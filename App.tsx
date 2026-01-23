@@ -2,9 +2,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType } from './types';
 import { translations, t } from './i18n';
-import { DEFAULT_SETTINGS, MOCK_BOT_DELAY_MS, MIN_TIME, MAX_TIME, MIN_CHARS, MAX_CHARS } from './constants';
-import { MockBackend } from './services/mockBackendService';
-import { GeminiService } from './services/geminiService';
+import { DEFAULT_SETTINGS, MIN_TIME, MAX_TIME, MIN_CHARS, MAX_CHARS } from './constants';
+import { SocketService } from './services/socketService';
 import { Button } from './components/Button';
 import { Input } from './components/Input';
 import { CodeInput } from './components/CodeInput';
@@ -63,7 +62,7 @@ const App: React.FC = () => {
   const [actionInput, setActionInput] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<RoundResult | null>(null);
+  // Removed local result state, using gameState.roundResult
   
   // Toast State
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
@@ -142,7 +141,18 @@ const App: React.FC = () => {
         setLang('ru');
     }
 
-    // Deep Linking Check
+    // Subscribe to Socket Updates
+    const unsubscribe = SocketService.subscribe((newState) => {
+      setGameState(newState);
+
+      // Handle Transition to Input: Reset Timer locally
+      if (newState.status === GameStatus.PLAYER_INPUT && gameState.status !== GameStatus.PLAYER_INPUT) {
+          timeLeftRef.current = newState.settings.timeLimitSeconds;
+          setTimeLeftDisplay(newState.settings.timeLimitSeconds);
+      }
+    });
+
+    // Deep Linking Check (Delayed to ensure socket connection or handled in connect)
     if (initData.start_param) {
       const playerObj = { 
         id: userId, 
@@ -150,13 +160,10 @@ const App: React.FC = () => {
         isCaptain: false, 
         status: 'waiting' as const 
       };
+      // We need to wait for user to be set/connection to be established?
+      // Actually we can just call join. SocketService handles connection.
       handleJoinLobby(initData.start_param, playerObj);
     }
-
-    // Subscribe to Mock Backend
-    const unsubscribe = MockBackend.subscribe((newState) => {
-      setGameState(newState);
-    });
 
     return () => unsubscribe();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -227,7 +234,11 @@ const App: React.FC = () => {
       apiKey: cleanKey 
     };
     
-    await MockBackend.createLobby(updatedUser, lobbySettings);
+    try {
+        await SocketService.createLobby(updatedUser, lobbySettings);
+    } catch (e: any) {
+        setErrorMsg(e.toString());
+    }
     setLoading(false);
   };
 
@@ -248,7 +259,7 @@ const App: React.FC = () => {
     setErrorMsg('');
     setLoading(true);
     
-    const success = await MockBackend.joinLobby(code, playerObj);
+    const success = await SocketService.joinLobby(code, playerObj);
     if (!success) {
         setErrorMsg(t('lobbyNotFound', lang));
         triggerHaptic('error');
@@ -257,8 +268,10 @@ const App: React.FC = () => {
   };
 
   const handleUpdateSettings = (key: keyof LobbySettings, value: any) => {
-      // 1. Update Backend (updates local State via subscription)
-      MockBackend.updateSettings({ [key]: value });
+      // 1. Update Backend
+      if (gameState.lobbyCode) {
+         SocketService.updateSettings(gameState.lobbyCode, { [key]: value });
+      }
       
       // 2. Persist to Local Storage (Merge with current)
       const newSettings = { ...gameState.settings, [key]: value };
@@ -280,28 +293,8 @@ const App: React.FC = () => {
   };
 
   const handleStartGame = async () => {
-    if (!gameState.settings.apiKey) return;
-    
-    MockBackend.updateStatus(GameStatus.SCENARIO_GENERATION);
-    
-    try {
-      const scenario = await GeminiService.generateScenario(
-        gameState.settings.apiKey, 
-        gameState.settings.mode,
-        gameState.settings.scenarioType
-      );
-      
-      MockBackend.setScenario(scenario);
-      MockBackend.updateStatus(GameStatus.PLAYER_INPUT);
-      
-      timeLeftRef.current = gameState.settings.timeLimitSeconds;
-      setTimeLeftDisplay(gameState.settings.timeLimitSeconds);
-      
-    } catch (error) {
-      console.error(error);
-      setErrorMsg("Failed to generate scenario. Check API Key.");
-      MockBackend.updateStatus(GameStatus.LOBBY_WAITING);
-    }
+    if (!gameState.lobbyCode) return;
+    SocketService.startGame(gameState.lobbyCode);
   };
 
   // Timer Logic
@@ -314,31 +307,20 @@ const App: React.FC = () => {
         
         if (timeLeftRef.current <= 0) {
            clearInterval(interval);
-           const currentUser = gameState.players.find(p => p.id === user?.id);
-           if (currentUser && currentUser.status !== 'ready') {
-             handleSubmitAction(true);
+           // Auto-submit logic is handled by server timeout.
+           // But we can submit partial text if we want to be safe.
+           if (actionInput.trim()) {
+               handleSubmitAction(true);
            }
         }
       }, 1000);
     }
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameState.status, user]);
-
-  // Check if everyone is ready
-  useEffect(() => {
-    if (gameState.status === GameStatus.PLAYER_INPUT) {
-        const allReady = gameState.players.every(p => p.status === 'ready');
-        if (allReady) {
-            handleJudgement();
-        }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameState.players, gameState.status]);
-
+  }, [gameState.status]);
 
   const handleSubmitAction = async (force = false) => {
-    if (!user || !gameState.settings.apiKey) return;
+    if (!user || !gameState.lobbyCode) return;
     
     let currentInput = actionInput.trim();
 
@@ -350,60 +332,19 @@ const App: React.FC = () => {
         if (!currentInput) {
             currentInput = t('frozenInFear', lang);
         }
-    }
-    
-    const cheatResult = await GeminiService.checkInjection(
-        gameState.settings.apiKey, 
-        currentInput
-    );
-
-    if (cheatResult.isCheat) {
-        triggerHaptic('error');
-        if (force) {
-            currentInput = "Attempts to cheat reality, but fails miserably.";
-        } else {
-             setErrorMsg(`${t('injectDetected', lang)} (${cheatResult.reason})`);
-             setLoading(false);
-             return;
-        }
-    }
-
-    if (force) {
         currentInput += t('timeOutNote', lang);
     }
-
-    await MockBackend.submitAction(user.id, currentInput);
+    
+    // Server performs cheat detection now
+    SocketService.submitAction(gameState.lobbyCode, currentInput);
     setLoading(false);
   };
 
-  const handleJudgement = async () => {
-    if (gameState.status === GameStatus.JUDGING) return;
-    MockBackend.updateStatus(GameStatus.JUDGING);
-    
-    try {
-        const outputLang = gameState.settings.storyLanguage || 'en';
-        const roundResult = await GeminiService.judgeRound(
-            gameState.settings.apiKey,
-            gameState.scenario || "",
-            gameState.players,
-            outputLang,
-            gameState.settings.mode
-        );
-        
-        setResult(roundResult);
-        MockBackend.applyResults(roundResult.survivors);
-        MockBackend.updateStatus(GameStatus.RESULTS);
-    } catch (e) {
-        console.error("Critical error in judging:", e);
-         MockBackend.updateStatus(GameStatus.RESULTS);
-    }
-  };
-
   const handleRestart = () => {
-      setResult(null);
+      if (!gameState.lobbyCode) return;
       setActionInput("");
       setErrorMsg("");
-      MockBackend.resetGame();
+      SocketService.resetGame(gameState.lobbyCode);
   };
 
   // -- Renders --
@@ -782,19 +723,19 @@ const App: React.FC = () => {
      );
   }
 
-  if (gameState.status === GameStatus.RESULTS && result) {
+  if (gameState.status === GameStatus.RESULTS && gameState.roundResult) {
       return (
           <div className="min-h-screen flex flex-col p-4">
               <h2 className="text-3xl font-black mb-6 text-center">RESULTS</h2>
               
               <div className="bg-tg-secondaryBg p-5 rounded-2xl mb-6 shadow-lg border border-tg-hint/10">
-                  <p className="leading-relaxed whitespace-pre-wrap">{result.story}</p>
+                  <p className="leading-relaxed whitespace-pre-wrap">{gameState.roundResult.story}</p>
               </div>
 
               <div className="space-y-3 mb-8">
                   <h3 className="text-sm font-bold text-tg-hint uppercase">Status Report</h3>
                   {gameState.players.map(p => {
-                      const isDead = result.deaths.find(d => d.playerId === p.id);
+                      const isDead = gameState.roundResult!.deaths.find(d => d.playerId === p.id);
                       return (
                           <div key={p.id} className={`flex items-center justify-between p-3 rounded-lg border ${isDead ? 'border-red-900 bg-red-900/10' : 'border-green-900 bg-green-900/10'}`}>
                               <span className="font-bold">{p.name}</span>

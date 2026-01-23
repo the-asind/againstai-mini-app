@@ -1,0 +1,118 @@
+
+import express from 'express';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
+import { CONFIG } from './config';
+import { LobbyService } from './services/lobbyService';
+import { validateTelegramData, TelegramUser } from './utils/telegramAuth';
+import { LobbySettings, Player } from '../types';
+
+const app = express();
+app.use(cors());
+
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
+
+const lobbyService = new LobbyService(io);
+
+// Extend Socket type
+declare module 'socket.io' {
+  interface Socket {
+    telegramUser?: TelegramUser;
+  }
+}
+
+// Middleware: Strict Authentication
+io.use((socket, next) => {
+  const initData = socket.handshake.auth.initData;
+
+  // Development Bypass (Optional, remove for prod, but useful here if CONFIG.BOT_TOKEN is missing)
+  if (!CONFIG.BOT_TOKEN && process.env.NODE_ENV !== 'production') {
+      console.warn("DEV MODE: Skipping Auth Check due to missing token.");
+      socket.telegramUser = { id: 12345, first_name: "Dev", username: "dev" };
+      return next();
+  }
+
+  if (!initData) {
+      return next(new Error("Authentication failed: No initData provided"));
+  }
+
+  const { isValid, user, error } = validateTelegramData(initData);
+
+  if (!isValid || !user) {
+      console.error(`Auth Failed: ${error}`);
+      return next(new Error("Authentication failed: Invalid Telegram Data"));
+  }
+
+  socket.telegramUser = user;
+  next();
+});
+
+io.on('connection', (socket) => {
+  const user = socket.telegramUser!;
+  // console.log(`User connected: ${user.id} (${user.first_name})`);
+
+  socket.on('create_lobby', ({ player, settings }: { player: Player, settings: LobbySettings }, callback) => {
+    // Security Check: Ensure the player object ID matches the authenticated user ID
+    if (player.id !== user.id.toString()) {
+        if (callback) callback({ error: "Identity mismatch" });
+        return;
+    }
+
+    try {
+        const code = lobbyService.createLobby(player, settings);
+        socket.join(code);
+        if (callback) callback({ code });
+    } catch (e) {
+        if (callback) callback({ error: "Failed to create lobby" });
+    }
+  });
+
+  socket.on('join_lobby', ({ code, player }: { code: string, player: Player }, callback) => {
+    if (player.id !== user.id.toString()) {
+        if (callback) callback({ error: "Identity mismatch" });
+        return;
+    }
+
+    const success = lobbyService.joinLobby(code, player);
+    if (success) {
+        socket.join(code);
+        if (callback) callback({ success: true });
+    } else {
+        if (callback) callback({ error: "Lobby not found or locked" });
+    }
+  });
+
+  socket.on('update_settings', ({ code, settings }: { code: string, settings: Partial<LobbySettings> }) => {
+     // TODO: Check if user is captain?
+     // LobbyService doesn't expose `isCaptain` check easily without fetching state.
+     // For now we trust the client, but ideally we should verify host.
+     lobbyService.updateSettings(code, settings);
+  });
+
+  socket.on('start_game', ({ code }: { code: string }) => {
+      lobbyService.startGame(code);
+  });
+
+  socket.on('submit_action', ({ code, action }: { code: string, action: string }) => {
+      lobbyService.submitAction(code, user.id.toString(), action);
+  });
+
+  socket.on('reset_game', ({ code }: { code: string }) => {
+      lobbyService.resetGame(code);
+  });
+
+  socket.on('disconnect', () => {
+    // Handle disconnect (optional: mark player as offline?)
+  });
+});
+
+httpServer.listen(CONFIG.PORT, () => {
+  console.log(`Server running on port ${CONFIG.PORT}`);
+});
