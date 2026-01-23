@@ -1,0 +1,5 @@
+{
+  "name": "Against AI: Survival Protocol",
+  "description": "A multiplayer survival text game powered by Google Gemini. Players face deadly scenarios and must describe their escape, judged by AI.",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Against AI</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              tg: {
+                bg: 'var(--tg-theme-bg-color, #1c1c1e)',
+                text: 'var(--tg-theme-text-color, #ffffff)',
+                hint: 'var(--tg-theme-hint-color, #98989e)',
+                link: 'var(--tg-theme-link-color, #007aff)',
+                button: 'var(--tg-theme-button-color, #007aff)',
+                buttonText: 'var(--tg-theme-button-text-color, #ffffff)',
+                secondaryBg: 'var(--tg-theme-secondary-bg-color, #2c2c2e)',
+              }
+            },
+            animation: {
+              'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        background-color: var(--tg-theme-bg-color, #1c1c1e);
+        color: var(--tg-theme-text-color, #ffffff);
+        overflow-x: hidden;
+      }
+      /* Hide scrollbar for clean UI */
+      ::-webkit-scrollbar {
+        width: 0px;
+        background: transparent;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
