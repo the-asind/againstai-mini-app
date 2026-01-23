@@ -6,6 +6,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import { CONFIG } from './config';
 import { LobbyService } from './services/lobbyService';
+import { GeminiService } from './services/geminiService';
 import { validateTelegramData, TelegramUser } from './utils/telegramAuth';
 import { LobbySettings, Player } from '../types';
 
@@ -66,6 +67,12 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   const user = socket.telegramUser!;
   // console.log(`User connected: ${user.id} (${user.first_name})`);
+
+  socket.on('validate_api_key', async ({ apiKey }: { apiKey: string }, callback) => {
+      // We can use a service or just call the Gemini service directly
+      const isValid = await GeminiService.validateKey(apiKey);
+      if (callback) callback({ isValid });
+  });
 
   socket.on('create_lobby', ({ player, settings }: { player: Player, settings: LobbySettings }, callback) => {
     // Security Check: Ensure the player object ID matches the authenticated user ID

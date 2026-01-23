@@ -8,6 +8,31 @@ const getClient = (apiKey: string) => new GoogleGenAI({ apiKey: apiKey.trim() })
 
 export const GeminiService = {
   /**
+   * Validates if the API Key is working by making a lightweight call.
+   */
+  validateKey: async (apiKey: string): Promise<boolean> => {
+    if (!apiKey || apiKey.length < 10) return false;
+
+    try {
+        const ai = getClient(apiKey);
+        const modelName = CONFIG.MODELS.FAST;
+
+        // Minimal token count request
+        await ai.models.generateContent({
+            model: modelName,
+            contents: "Ping",
+            config: {
+                maxOutputTokens: 1
+            }
+        });
+        return true;
+    } catch (e) {
+        console.error("API Key Validation Failed:", e);
+        return false;
+    }
+  },
+
+  /**
    * Generates a survival scenario.
    */
   generateScenario: async (

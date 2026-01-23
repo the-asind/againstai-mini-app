@@ -143,13 +143,15 @@ const App: React.FC = () => {
 
     // Subscribe to Socket Updates
     const unsubscribe = SocketService.subscribe((newState) => {
-      setGameState(newState);
-
-      // Handle Transition to Input: Reset Timer locally
-      if (newState.status === GameStatus.PLAYER_INPUT && gameState.status !== GameStatus.PLAYER_INPUT) {
-          timeLeftRef.current = newState.settings.timeLimitSeconds;
-          setTimeLeftDisplay(newState.settings.timeLimitSeconds);
-      }
+      setGameState((prevState) => {
+        // Handle Transition to Input: Reset Timer locally
+        // We use prevState to avoid closure staleness issues
+        if (newState.status === GameStatus.PLAYER_INPUT && prevState.status !== GameStatus.PLAYER_INPUT) {
+            timeLeftRef.current = newState.settings.timeLimitSeconds;
+            setTimeLeftDisplay(newState.settings.timeLimitSeconds);
+        }
+        return newState;
+      });
     });
 
     // Deep Linking Check (Delayed to ensure socket connection or handled in connect)
@@ -233,8 +235,18 @@ const App: React.FC = () => {
       ...gameState.settings, // Use current state settings (which were loaded from LS)
       apiKey: cleanKey 
     };
-    
+
+    setLoading(true);
+
     try {
+        // Validate Key First
+        const isValid = await SocketService.validateApiKey(cleanKey);
+        if (!isValid) {
+            setErrorMsg(t('errorApiKey', lang)); // Re-use generic error or create specific
+            setLoading(false);
+            return;
+        }
+
         await SocketService.createLobby(updatedUser, lobbySettings);
     } catch (e: any) {
         setErrorMsg(e.toString());

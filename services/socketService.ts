@@ -48,6 +48,15 @@ class SocketServiceImpl {
       this.subscribers.forEach(cb => cb(state));
   }
 
+  public async validateApiKey(apiKey: string): Promise<boolean> {
+      this.connect();
+      return new Promise((resolve) => {
+          this.socket?.emit('validate_api_key', { apiKey }, (response: { isValid: boolean }) => {
+              resolve(response.isValid);
+          });
+      });
+  }
+
   public async createLobby(player: Player, settings: LobbySettings): Promise<string> {
       this.connect(); // Ensure connection
       return new Promise((resolve, reject) => {
