@@ -1,5 +1,6 @@
 
 import express from 'express';
+import path from 'path';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
@@ -10,6 +11,14 @@ import { LobbySettings, Player } from '../types';
 
 const app = express();
 app.use(cors());
+
+// Serve static files from the public directory
+app.use(express.static(path.join(process.cwd(), 'public')));
+
+// Handle Single Page Application routing (serve index.html for all non-API routes)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(process.cwd(), 'public', 'index.html'));
+});
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {

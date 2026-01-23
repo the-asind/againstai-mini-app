@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    container_name: against-ai-app
+    restart: always
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - PORT=3000
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - GEMINI_API_KEY=${GEMINI_API_KEY} # Note: The code uses client-side key currently in settings, but good to have env just in case we switch to server-side key management fully.
+      - GEMINI_MODEL_FAST=${GEMINI_MODEL_FAST:-gemini-2.0-flash}
+      - GEMINI_MODEL_SMART=${GEMINI_MODEL_SMART:-gemini-1.5-pro}
+      # If we want to serve frontend from this container, we need to ensure server code serves ./public
