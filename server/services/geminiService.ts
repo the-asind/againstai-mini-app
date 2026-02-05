@@ -11,7 +11,7 @@ const getCustomFetch = () => {
     if (!proxyUrl) return undefined;
 
     const dispatcher = new ProxyAgent(proxyUrl);
-    return (url: string | URL | Request, init?: RequestInit) => {
+    return (url: any, init?: any) => {
         return undiciFetch(url, { ...init, dispatcher } as any) as unknown as Promise<Response>;
     };
 };
@@ -19,7 +19,7 @@ const getCustomFetch = () => {
 const getClient = (apiKey: string) => new GoogleGenAI({
     apiKey: apiKey.trim(),
     fetch: getCustomFetch()
-});
+} as any);
 
 export const GeminiService = {
   /**
