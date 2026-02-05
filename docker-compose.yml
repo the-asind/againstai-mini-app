@@ -8,6 +8,9 @@ services:
     environment:
       - PORT=3000
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - GEMINI_MODEL_FAST=${GEMINI_MODEL_FAST:-gemini-2.0-flash}
-      - GEMINI_MODEL_SMART=${GEMINI_MODEL_SMART:-gemini-1.5-pro}
-      # If we want to serve frontend from this container, we need to ensure server code serves ./public
+      - GEMINI_MODEL_FAST=${GEMINI_MODEL_FAST:-gemini-3-flash-preview}
+      - GEMINI_MODEL_SMART=${GEMINI_MODEL_SMART:-gemini-3-pro-preview}
+      - GEMINI_BIND_INTERFACE=${GEMINI_BIND_INTERFACE} # Optional: IP to bind for outbound requests
+      # Note: For binding to host interface (e.g. 10.10.10.2), you might need 'network_mode: host'
+      # or appropriate routing setup.
+      # network_mode: "host"
