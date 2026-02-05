@@ -84,6 +84,7 @@ io.on('connection', (socket) => {
     try {
         const code = lobbyService.createLobby(player, settings);
         socket.join(code);
+        lobbyService.emitUpdate(code);
         if (callback) callback({ code });
     } catch (e) {
         if (callback) callback({ error: "Failed to create lobby" });

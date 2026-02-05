@@ -10,7 +10,9 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "moduleResolution": "node"
+    "moduleResolution": "node",
+    "noEmit": false,
+    "allowImportingTsExtensions": false
   },
   "include": ["server/**/*", "types.ts", "constants.ts"],
   "exclude": ["src/**/*", "node_modules"]

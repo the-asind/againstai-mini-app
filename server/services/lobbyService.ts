@@ -250,7 +250,7 @@ export class LobbyService {
       this.emitUpdate(code);
   }
 
-  private emitUpdate(code: string) {
+  public emitUpdate(code: string) {
     const lobby = this.lobbies.get(code);
     if (lobby) {
         this.io.to(code).emit('game_state', lobby);
