@@ -21,13 +21,16 @@ export const GeminiService = {
         // Minimal token count request
         const result = await model.generateContent({
              contents: [{ role: 'user', parts: [{ text: "Ping" }] }],
-             generationConfig: { maxOutputTokens: 1 }
+             // generationConfig: { maxOutputTokens: 1 } // Removed to avoid potential config issues with some models
         });
 
-        await result.response;
-        return true;
-    } catch (e) {
-        console.error("API Key Validation Failed:", e);
+        const response = await result.response;
+        return !!response.text();
+    } catch (e: any) {
+        console.error(`API Key Validation Failed for model ${CONFIG.MODELS.FAST}:`, e.message || e);
+        if (e.response) {
+            console.error("Error Response:", JSON.stringify(e.response, null, 2));
+        }
         return false;
     }
   },
