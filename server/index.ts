@@ -9,21 +9,26 @@ import { LobbyService } from './services/lobbyService';
 import { GeminiService } from './services/geminiService';
 import { validateTelegramData, TelegramUser } from './utils/telegramAuth';
 import { LobbySettings, Player } from '../types';
-import { setGlobalDispatcher, ProxyAgent } from 'undici';
+import { setGlobalDispatcher, ProxyAgent, fetch as undiciFetch } from 'undici';
 
 // Configure Proxy if env vars are present
 const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
 if (proxyUrl) {
   console.log(`Using Proxy: ${proxyUrl}`);
   const dispatcher = new ProxyAgent(proxyUrl);
-  setGlobalDispatcher(dispatcher);
+
+  // Monkey-patch global fetch to force proxy usage
+  // This is required because Node.js native fetch might not respect setGlobalDispatcher
+  // or the SDK might rely on globalThis.fetch
+  globalThis.fetch = (input: any, init?: any) => {
+    return undiciFetch(input, { ...init, dispatcher }) as unknown as Promise<Response>;
+  };
 }
 
 // Diagnostics: Check IP
 (async () => {
   try {
     console.log("Checking external IP...");
-    // Use standard global fetch (now routed via ProxyAgent if set)
     const res = await fetch("https://ifconfig.me/ip");
     const ip = await res.text();
     console.log(`Current External IP: ${ip.trim()}`);
