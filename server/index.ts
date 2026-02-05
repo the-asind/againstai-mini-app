@@ -9,18 +9,14 @@ import { LobbyService } from './services/lobbyService';
 import { GeminiService } from './services/geminiService';
 import { validateTelegramData, TelegramUser } from './utils/telegramAuth';
 import { LobbySettings, Player } from '../types';
-import { setGlobalDispatcher, Agent } from 'undici';
+import { setGlobalDispatcher, ProxyAgent } from 'undici';
 
-// Optional: Bind outbound traffic to a specific interface
-if (CONFIG.GEMINI_BIND_INTERFACE) {
-  console.log(`Binding outbound requests to interface: ${CONFIG.GEMINI_BIND_INTERFACE}`);
-  const agent = new Agent({
-    localAddress: CONFIG.GEMINI_BIND_INTERFACE,
-    connect: {
-        // Additional connection options if needed
-    }
-  });
-  setGlobalDispatcher(agent);
+// Configure Proxy if env vars are present
+const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+if (proxyUrl) {
+  console.log(`Using Proxy: ${proxyUrl}`);
+  const dispatcher = new ProxyAgent(proxyUrl);
+  setGlobalDispatcher(dispatcher);
 }
 
 const app = express();

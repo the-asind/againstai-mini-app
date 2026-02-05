@@ -10,7 +10,6 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - GEMINI_MODEL_FAST=${GEMINI_MODEL_FAST:-gemini-3-flash-preview}
       - GEMINI_MODEL_SMART=${GEMINI_MODEL_SMART:-gemini-3-pro-preview}
-      - GEMINI_BIND_INTERFACE=${GEMINI_BIND_INTERFACE} # Optional: IP to bind for outbound requests
-      # Note: For binding to host interface (e.g. 10.10.10.2), you might need 'network_mode: host'
-      # or appropriate routing setup.
-      # network_mode: "host"
+      # Proxy Configuration (Optional)
+      # - HTTP_PROXY=http://172.17.0.1:10808
+      # - HTTPS_PROXY=http://172.17.0.1:10808
