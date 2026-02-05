@@ -12,6 +12,7 @@ const getCustomFetch = () => {
 
     const dispatcher = new ProxyAgent(proxyUrl);
     return (url: any, init?: any) => {
+        console.log(`[Proxy] Fetching: ${url}`);
         return undiciFetch(url, { ...init, dispatcher } as any) as unknown as Promise<Response>;
     };
 };
