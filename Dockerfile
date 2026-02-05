@@ -25,10 +25,11 @@ RUN npm ci --only=production
 
 # Copy built backend
 COPY --from=backend-builder /app/dist-server ./dist-server
-# Copy built frontend to a public folder for the server to serve (if configured)
-# OR we assume the server serves it.
-# In our server/index.ts, we didn't add static file serving.
-# We should add it to server/index.ts to make this a self-contained container.
+
+# Force dist-server to be treated as CommonJS
+RUN echo '{"type": "commonjs"}' > ./dist-server/package.json
+
+# Copy built frontend to a public folder for the server to serve
 COPY --from=frontend-builder /app/dist ./public
 
 # Environment variables will be passed via docker-compose
