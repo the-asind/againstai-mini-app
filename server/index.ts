@@ -17,7 +17,7 @@ app.use(cors());
 app.use(express.static(path.join(process.cwd(), 'public')));
 
 // Handle Single Page Application routing (serve index.html for all non-API routes)
-app.get('*', (req, res) => {
+app.get(/(.*)/, (req, res) => {
   res.sendFile(path.join(process.cwd(), 'public', 'index.html'));
 });
 
