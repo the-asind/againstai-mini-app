@@ -2,7 +2,7 @@
 import { io, Socket } from 'socket.io-client';
 import { GameState, LobbySettings, Player, GameStatus } from '../types';
 
-const URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const URL = import.meta.env.VITE_API_URL || undefined; // undefined = auto-detect host
 
 type GameStateCallback = (state: GameState) => void;
 
@@ -19,7 +19,7 @@ class SocketServiceImpl {
       auth: {
         initData: initData
       },
-      transports: ['websocket']
+      transports: ['websocket', 'polling'] // Add polling fallback
     });
 
     this.socket.on('connect_error', (err) => {
