@@ -10,6 +10,6 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - GEMINI_MODEL_FAST=${GEMINI_MODEL_FAST:-gemini-3-flash-preview}
       - GEMINI_MODEL_SMART=${GEMINI_MODEL_SMART:-gemini-3-pro-preview}
-      # Proxy Configuration (Optional)
-      # - HTTP_PROXY=http://172.17.0.1:10808
-      # - HTTPS_PROXY=http://172.17.0.1:10808
+      # Proxy Configuration (passed from .env)
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
