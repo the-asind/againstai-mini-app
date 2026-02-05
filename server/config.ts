@@ -8,7 +8,7 @@ export const CONFIG = {
   BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
   // Default models if not specified in env
   MODELS: {
-    FAST: process.env.GEMINI_MODEL_FAST || 'gemini-2.0-flash',
-    SMART: process.env.GEMINI_MODEL_SMART || 'gemini-1.5-pro'
+    FAST: process.env.GEMINI_MODEL_FAST || 'gemini-3-flash-preview',
+    SMART: process.env.GEMINI_MODEL_SMART || 'gemini-3-pro-preview'
   }
 };

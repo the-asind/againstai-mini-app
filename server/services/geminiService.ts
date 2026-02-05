@@ -1,10 +1,10 @@
 
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { CONFIG } from "../config";
 import { SYSTEM_INSTRUCTIONS } from "../prompts";
 import { GameMode, ScenarioType, Player, RoundResult, Language } from "../../types";
 
-const getClient = (apiKey: string) => new GoogleGenerativeAI(apiKey.trim());
+const getClient = (apiKey: string) => new GoogleGenAI({ apiKey: apiKey.trim() });
 
 export const GeminiService = {
   /**
@@ -14,18 +14,20 @@ export const GeminiService = {
     if (!apiKey || apiKey.length < 10) return false;
 
     try {
-        const genAI = getClient(apiKey);
+        const ai = getClient(apiKey);
         const modelName = CONFIG.MODELS.FAST;
-        const model = genAI.getGenerativeModel({ model: modelName });
 
         // Minimal token count request
-        const result = await model.generateContent({
-             contents: [{ role: 'user', parts: [{ text: "Ping" }] }],
-             // generationConfig: { maxOutputTokens: 1 } // Removed to avoid potential config issues with some models
+        const response = await ai.models.generateContent({
+            model: modelName,
+            contents: "Ping",
+            config: {
+                // thinkingConfig: { thinkingLevel: "low" }, // Optional for Flash 3
+                responseMimeType: "text/plain"
+            }
         });
 
-        const response = await result.response;
-        return !!response.text();
+        return !!response.text;
     } catch (e: any) {
         console.error(`API Key Validation Failed for model ${CONFIG.MODELS.FAST}:`, e.message || e);
         if (e.response) {
@@ -46,12 +48,8 @@ export const GeminiService = {
   ): Promise<string> => {
     if (!apiKey) throw new Error("API Key required");
 
-    const genAI = getClient(apiKey);
+    const ai = getClient(apiKey);
     const modelName = CONFIG.MODELS.SMART;
-    const model = genAI.getGenerativeModel({
-        model: modelName,
-        systemInstruction: SYSTEM_INSTRUCTIONS.SCENARIO_GENERATOR
-    });
 
     const langInstruction = language === 'ru' ? "Output Language: RUSSIAN" : "Output Language: ENGLISH";
 
@@ -66,6 +64,8 @@ export const GeminiService = {
     }
 
     const prompt = `
+      ${SYSTEM_INSTRUCTIONS.SCENARIO_GENERATOR}
+
       SETTINGS:
       Game Mode: ${mode}
       Theme: ${typeInstruction}
@@ -74,9 +74,22 @@ export const GeminiService = {
     `;
 
     try {
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      return response.text() || "Error: No scenario generated.";
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: prompt,
+        config: {
+           // systemInstruction is passed in config for this SDK?
+           // Documentation says: config: { systemInstruction: ... } OR distinct param?
+           // The SDK examples for Python show `config=types.GenerateContentConfig(...)`.
+           // JS example uses `config: { ... }`.
+           // Let's assume systemInstruction goes into config or part of contents for now,
+           // but `systemInstruction` property is supported in `config` in newer APIs.
+           // However, mixing prompt and system instruction in `contents` is safer if unsure.
+           // Let's put system instruction in the prompt string above.
+        }
+      });
+
+      return response.text || "Error: No scenario generated.";
     } catch (error) {
       console.error("Gemini Generate Scenario Error:", error);
       throw error;
@@ -89,29 +102,30 @@ export const GeminiService = {
   checkInjection: async (apiKey: string, actionText: string): Promise<{ isCheat: boolean; reason?: string }> => {
     if (!apiKey) return { isCheat: false };
 
-    const genAI = getClient(apiKey);
+    const ai = getClient(apiKey);
     const modelName = CONFIG.MODELS.FAST;
-    const model = genAI.getGenerativeModel({
-        model: modelName,
-        systemInstruction: SYSTEM_INSTRUCTIONS.CHEAT_DETECTOR,
-        generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: SchemaType.OBJECT,
-                properties: {
-                  isCheat: { type: SchemaType.BOOLEAN },
-                  reason: { type: SchemaType.STRING, nullable: true },
-                },
-                required: ["isCheat"]
-            }
-        }
-    });
 
     try {
-      const result = await model.generateContent(`Player Action: "${actionText}"`);
-      const response = await result.response;
-      const text = response.text();
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: `
+          ${SYSTEM_INSTRUCTIONS.CHEAT_DETECTOR}
+          Player Action: "${actionText}"
+        `,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              isCheat: { type: Type.BOOLEAN },
+              reason: { type: Type.STRING, nullable: true },
+            },
+            required: ["isCheat"]
+          }
+        }
+      });
 
+      const text = response.text;
       if (!text) return { isCheat: false };
       return JSON.parse(text);
     } catch (error) {
@@ -132,7 +146,7 @@ export const GeminiService = {
   ): Promise<RoundResult> => {
     if (!apiKey) throw new Error("API Key required");
 
-    const genAI = getClient(apiKey);
+    const ai = getClient(apiKey);
     const modelName = CONFIG.MODELS.SMART;
 
     const langInstruction = language === 'ru' ? "Write the story in RUSSIAN." : "Write the story in ENGLISH.";
@@ -147,6 +161,8 @@ export const GeminiService = {
     }));
 
     const prompt = `
+      ${SYSTEM_INSTRUCTIONS.JUDGE_BASE}
+
       CONTEXT:
       ${langInstruction}
       Scenario: ${scenario}
@@ -156,40 +172,37 @@ export const GeminiService = {
       ${JSON.stringify(inputs, null, 2)}
     `;
 
-    const model = genAI.getGenerativeModel({
-        model: modelName,
-        systemInstruction: SYSTEM_INSTRUCTIONS.JUDGE_BASE,
-        generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: SchemaType.OBJECT,
-                properties: {
-                    story: { type: SchemaType.STRING },
-                    survivors: {
-                        type: SchemaType.ARRAY,
-                        items: { type: SchemaType.STRING }
-                    },
-                    deaths: {
-                        type: SchemaType.ARRAY,
-                        items: {
-                            type: SchemaType.OBJECT,
-                            properties: {
-                                playerId: { type: SchemaType.STRING },
-                                reason: { type: SchemaType.STRING }
-                            }
-                        }
-                    }
-                },
-                required: ["story", "survivors", "deaths"]
-            }
-        }
-    });
-
     try {
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              story: { type: Type.STRING },
+              survivors: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              },
+              deaths: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    playerId: { type: Type.STRING },
+                    reason: { type: Type.STRING }
+                  }
+                }
+              }
+            },
+            required: ["story", "survivors", "deaths"]
+          }
+        }
+      });
 
+      const text = response.text;
       if (!text) throw new Error("Empty response from AI");
 
       return JSON.parse(text) as RoundResult;
