@@ -9,31 +9,34 @@ import { LobbyService } from './services/lobbyService';
 import { GeminiService } from './services/geminiService';
 import { validateTelegramData, TelegramUser } from './utils/telegramAuth';
 import { LobbySettings, Player } from '../types';
-import { setGlobalDispatcher, ProxyAgent, fetch as undiciFetch } from 'undici';
+import { ProxyAgent, request } from 'undici';
 
-// Configure Proxy if env vars are present
-const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
-if (proxyUrl) {
-  console.log(`Using Proxy: ${proxyUrl}`);
-  const dispatcher = new ProxyAgent(proxyUrl);
-
-  // Monkey-patch global fetch to force proxy usage
-  // This is required because Node.js native fetch might not respect setGlobalDispatcher
-  // or the SDK might rely on globalThis.fetch
-  globalThis.fetch = (input: any, init?: any) => {
-    return undiciFetch(input, { ...init, dispatcher }) as unknown as Promise<Response>;
-  };
-}
-
-// Diagnostics: Check IP
+// Diagnostics: Check IP with Proxy Explicitly
 (async () => {
   try {
-    console.log("Checking external IP...");
-    const res = await fetch("https://ifconfig.me/ip");
-    const ip = await res.text();
-    console.log(`Current External IP: ${ip.trim()}`);
+    console.log("Checking external IP (Direct & Proxy)...");
+
+    // 1. Direct check (using native fetch)
+    /*
+    try {
+        const directRes = await fetch("https://ifconfig.me/ip");
+        console.log(`Direct IP: ${(await directRes.text()).trim()}`);
+    } catch (e: any) { console.log("Direct IP check failed:", e.message); }
+    */
+
+    // 2. Proxy check (using undici request)
+    const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+    if (proxyUrl) {
+        console.log(`Testing Proxy connection to: ${proxyUrl}`);
+        const dispatcher = new ProxyAgent(proxyUrl);
+        const { body } = await request("https://ifconfig.me/ip", { dispatcher });
+        const ip = await body.text();
+        console.log(`Proxy IP: ${ip.trim()}`);
+    } else {
+        console.log("No proxy configured.");
+    }
   } catch (e: any) {
-    console.error("Failed to check external IP:", e.message);
+    console.error("Diagnostic Failed:", e.message);
     if (e.cause) console.error("Cause:", e.cause);
   }
 })();

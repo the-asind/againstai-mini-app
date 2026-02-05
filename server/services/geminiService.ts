@@ -1,10 +1,25 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
+import { fetch as undiciFetch, ProxyAgent } from 'undici';
 import { CONFIG } from "../config";
 import { SYSTEM_INSTRUCTIONS } from "../prompts";
 import { GameMode, ScenarioType, Player, RoundResult, Language } from "../../types";
 
-const getClient = (apiKey: string) => new GoogleGenAI({ apiKey: apiKey.trim() });
+// Create a custom fetch function that uses the ProxyAgent if configured
+const getCustomFetch = () => {
+    const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+    if (!proxyUrl) return undefined;
+
+    const dispatcher = new ProxyAgent(proxyUrl);
+    return (url: string | URL | Request, init?: RequestInit) => {
+        return undiciFetch(url, { ...init, dispatcher } as any) as unknown as Promise<Response>;
+    };
+};
+
+const getClient = (apiKey: string) => new GoogleGenAI({
+    apiKey: apiKey.trim(),
+    fetch: getCustomFetch()
+});
 
 export const GeminiService = {
   /**
