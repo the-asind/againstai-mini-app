@@ -19,6 +19,20 @@ if (proxyUrl) {
   setGlobalDispatcher(dispatcher);
 }
 
+// Diagnostics: Check IP
+(async () => {
+  try {
+    console.log("Checking external IP...");
+    // Use standard global fetch (now routed via ProxyAgent if set)
+    const res = await fetch("https://ifconfig.me/ip");
+    const ip = await res.text();
+    console.log(`Current External IP: ${ip.trim()}`);
+  } catch (e: any) {
+    console.error("Failed to check external IP:", e.message);
+    if (e.cause) console.error("Cause:", e.cause);
+  }
+})();
+
 const app = express();
 app.use(cors());
 
