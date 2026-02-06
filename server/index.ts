@@ -9,7 +9,7 @@ import { LobbyService } from './services/lobbyService';
 import { GeminiService } from './services/geminiService';
 import { validateTelegramData, TelegramUser } from './utils/telegramAuth';
 import { LobbySettings, Player } from '../types';
-import { ProxyAgent, request } from 'undici';
+import { ProxyAgent, request, fetch as undiciFetch } from 'undici';
 
 // Diagnostics: Check IP with Proxy Explicitly
 (async () => {
@@ -29,6 +29,13 @@ import { ProxyAgent, request } from 'undici';
     if (proxyUrl) {
         console.log(`Testing Proxy connection to: ${proxyUrl}`);
         const dispatcher = new ProxyAgent(proxyUrl);
+
+        // Setup Global Fetch Patch for SDKs
+        globalThis.fetch = (input: any, init?: any) => {
+            console.log(`[Global Fetch Proxy] Request to: ${typeof input === 'string' ? input : (input as Request).url}`);
+            return undiciFetch(input, { ...init, dispatcher }) as unknown as Promise<Response>;
+        };
+
         const { body } = await request("https://ifconfig.me/ip", { dispatcher });
         const ip = await body.text();
         console.log(`Proxy IP: ${ip.trim()}`);
