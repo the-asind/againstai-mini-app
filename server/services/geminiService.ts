@@ -83,6 +83,9 @@ export const GeminiService = {
     `;
 
     try {
+      console.log(`[Gemini Request] Model: ${modelName}, Task: SCENARIO_GENERATOR`);
+      console.log(`[Gemini Request] Prompt Preview: ${prompt.substring(0, 200)}...`);
+
       const response = await ai.models.generateContent({
         model: modelName,
         contents: prompt,
@@ -98,7 +101,9 @@ export const GeminiService = {
         }
       });
 
-      return response.text || "Error: No scenario generated.";
+      const text = response.text || "Error: No scenario generated.";
+      console.log(`[Gemini Response] Output: ${text.substring(0, 200)}...`);
+      return text;
     } catch (error) {
       console.error("Gemini Generate Scenario Error:", error);
       throw error;
@@ -119,6 +124,9 @@ export const GeminiService = {
     const modelName = getModelName('balanced', 'FAST');
 
     try {
+      console.log(`[Gemini Request] Model: ${modelName}, Task: CHEAT_DETECTOR`);
+      console.log(`[Gemini Request] Action: "${actionText}"`);
+
       const response = await ai.models.generateContent({
         model: modelName,
         contents: `
@@ -139,6 +147,8 @@ export const GeminiService = {
       });
 
       const text = response.text;
+      console.log(`[Gemini Response] Output: ${text}`);
+
       if (!text) return { isCheat: false };
       return JSON.parse(text);
     } catch (error) {
@@ -187,6 +197,10 @@ export const GeminiService = {
     `;
 
     try {
+      console.log(`[Gemini Request] Model: ${modelName}, Task: JUDGE_BASE`);
+      console.log(`[Gemini Request] Scenario: ${scenario.substring(0, 50)}...`);
+      console.log(`[Gemini Request] Players Count: ${players.length}`);
+
       const response = await ai.models.generateContent({
         model: modelName,
         contents: prompt,
@@ -217,6 +231,8 @@ export const GeminiService = {
       });
 
       const text = response.text;
+      console.log(`[Gemini Response] Output: ${text}`);
+
       if (!text) throw new Error("Empty response from AI");
 
       return JSON.parse(text) as RoundResult;
