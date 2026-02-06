@@ -189,23 +189,23 @@ export class LobbyService {
 
      try {
          // 1. Check for Cheating (Parallel)
-         const cheatChecks = await Promise.all(
-             lobby.players.map(async (p) => {
-                 if (!p.actionText) return { id: p.id, isCheat: false };
-                 const check = await GeminiService.checkInjection(lobby.settings.apiKey, p.actionText);
-                 return { id: p.id, ...check };
-             })
-         );
+         // const cheatChecks = await Promise.all(
+         //     lobby.players.map(async (p) => {
+         //         if (!p.actionText) return { id: p.id, isCheat: false };
+         //         const check = await GeminiService.checkInjection(lobby.settings.apiKey, p.actionText);
+         //         return { id: p.id, ...check };
+         //     })
+         // );
 
          // 2. Annotate Actions
-         cheatChecks.forEach(check => {
-             if (check.isCheat) {
-                 const p = lobby.players.find(pl => pl.id === check.id);
-                 if (p) {
-                     p.actionText = `[ATTEMPTED CHEAT: ${check.reason}] ${p.actionText}`;
-                 }
-             }
-         });
+         // cheatChecks.forEach(check => {
+         //     if (check.isCheat) {
+         //         const p = lobby.players.find(pl => pl.id === check.id);
+         //         if (p) {
+         //             p.actionText = `[ATTEMPTED CHEAT: ${check.reason}] ${p.actionText}`;
+         //         }
+         //     }
+         // });
 
          // 3. Judge
          const lang = lobby.settings.storyLanguage || 'en';
