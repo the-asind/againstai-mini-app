@@ -527,51 +527,47 @@ const App: React.FC = () => {
                       <div className="flex justify-between text-sm mb-2">
                           <span>{t('gameMode', lang)}</span>
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="flex flex-col gap-2">
                           {Object.values(GameMode).map((mode) => (
                              <button
                                 key={mode}
                                 onClick={() => handleUpdateSettings('mode', mode)}
                                 disabled={!user?.isCaptain}
-                                className={`py-2 text-[10px] font-bold uppercase rounded-lg border transition-all flex items-center justify-center text-center
+                                className={`p-3 rounded-lg border transition-all text-left group
                                     ${gameState.settings.mode === mode 
                                         ? 'bg-tg-button text-white border-transparent' 
-                                        : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
+                                        : 'bg-tg-bg text-tg-text border-tg-hint/10 hover:bg-tg-bg/80'
                                     }
                                     ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
                                 `}
                              >
-                                 {mode === GameMode.COOP && t('coop', lang)}
-                                 {mode === GameMode.PVP && t('pvp', lang)}
-                                 {mode === GameMode.BATTLE_ROYALE && t('battleRoyale', lang)}
+                                 <div className="text-xs font-bold uppercase mb-1">
+                                     {mode === GameMode.COOP && t('coop', lang)}
+                                     {mode === GameMode.PVP && t('pvp', lang)}
+                                     {mode === GameMode.BATTLE_ROYALE && t('battleRoyale', lang)}
+                                 </div>
+                                 <div className={`text-[10px] leading-relaxed ${gameState.settings.mode === mode ? 'text-white/80' : 'text-tg-hint'}`}>
+                                     {mode === GameMode.COOP && t('coopDesc', lang)}
+                                     {mode === GameMode.PVP && t('pvpDesc', lang)}
+                                     {mode === GameMode.BATTLE_ROYALE && t('battleRoyaleDesc', lang)}
+                                 </div>
                              </button>
                           ))}
                       </div>
                   </div>
 
-                  {/* Scenario Type Selector (Horizontal Scroll with Drag & Touch Support) */}
+                  {/* Scenario Type Selector (Wrapped Grid) */}
                   <div className="mb-4">
                       <div className="flex justify-between text-sm mb-2">
                           <span>{t('scenarioType', lang)}</span>
                       </div>
-                      <div 
-                        ref={scrollContainerRef}
-                        className={`flex gap-2 overflow-x-auto pb-2 no-scrollbar ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} select-none`}
-                        onMouseDown={handleMouseDown}
-                        onMouseLeave={handleMouseLeave}
-                        onMouseUp={handleMouseUp}
-                        onMouseMove={handleMouseMove}
-                        // Removed style={{ scrollBehavior: 'smooth' }} to allow fluid finger scrolling
-                      >
+                      <div className="flex flex-wrap gap-2 justify-center">
                           {Object.values(ScenarioType).map((type) => (
                              <button
                                 key={type}
-                                onClick={() => {
-                                    // Prevent click if we were just dragging
-                                    if (!isDragging) handleUpdateSettings('scenarioType', type);
-                                }}
+                                onClick={() => handleUpdateSettings('scenarioType', type)}
                                 disabled={!user?.isCaptain}
-                                className={`flex-shrink-0 px-4 py-2 text-xs font-bold uppercase rounded-full border transition-all whitespace-nowrap pointer-events-auto
+                                className={`px-4 py-2 text-xs font-bold uppercase rounded-full border transition-all
                                     ${gameState.settings.scenarioType === type 
                                         ? 'bg-tg-button text-white border-transparent' 
                                         : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
@@ -651,10 +647,7 @@ const App: React.FC = () => {
                   {/* AI Model Level */}
                   <div>
                       <div className="flex justify-between text-sm mb-2">
-                          <span className="flex items-center gap-1">
-                              {t('aiLevel', lang)}
-                              <span className="text-tg-hint text-[10px] ml-1 opacity-70">(?)</span>
-                          </span>
+                          <span>{t('aiLevel', lang)}</span>
                       </div>
                       <div className="grid grid-cols-3 gap-2">
                           {(['economy', 'balanced', 'premium'] as AIModelLevel[]).map((level) => (
