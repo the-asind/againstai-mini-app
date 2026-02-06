@@ -2,10 +2,16 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { CONFIG } from "../config";
 import { SYSTEM_INSTRUCTIONS } from "../prompts";
-import { GameMode, ScenarioType, Player, RoundResult, Language } from "../../types";
+import { GameMode, ScenarioType, Player, RoundResult, Language, AIModelLevel } from "../../types";
 
 // We rely on the global fetch patch in server/index.ts to handle proxying
 const getClient = (apiKey: string) => new GoogleGenAI({ apiKey: apiKey.trim() });
+
+// Helper to pick model based on level
+const getModelName = (level: AIModelLevel = 'balanced', type: 'FAST' | 'SMART'): string => {
+    const configLevel = CONFIG.AI_LEVELS[level] || CONFIG.AI_LEVELS.balanced;
+    return configLevel[type];
+};
 
 export const GeminiService = {
   /**
@@ -16,7 +22,8 @@ export const GeminiService = {
 
     try {
         const ai = getClient(apiKey);
-        const modelName = CONFIG.MODELS.FAST;
+        // Use Economy FAST model for validation to save cost
+        const modelName = getModelName('economy', 'FAST');
 
         // Minimal token count request
         const response = await ai.models.generateContent({
@@ -45,12 +52,13 @@ export const GeminiService = {
     apiKey: string,
     mode: GameMode,
     type: ScenarioType,
-    language: Language = 'en'
+    language: Language = 'en',
+    aiLevel: AIModelLevel = 'balanced'
   ): Promise<string> => {
     if (!apiKey) throw new Error("API Key required");
 
     const ai = getClient(apiKey);
-    const modelName = CONFIG.MODELS.SMART;
+    const modelName = getModelName(aiLevel, 'SMART');
 
     const langInstruction = language === 'ru' ? "Output Language: RUSSIAN" : "Output Language: ENGLISH";
 
@@ -103,8 +111,12 @@ export const GeminiService = {
   checkInjection: async (apiKey: string, actionText: string): Promise<{ isCheat: boolean; reason?: string }> => {
     if (!apiKey) return { isCheat: false };
 
+    // Cheat detection always uses FAST model of the requested level?
+    // Actually, usually FAST is enough. We can use Balanced Fast or Economy Fast?
+    // Let's use Economy FAST to save money on checks, as cheat detection is simple.
+    // OR use the level user paid for. Let's use 'balanced' FAST as default robust.
     const ai = getClient(apiKey);
-    const modelName = CONFIG.MODELS.FAST;
+    const modelName = getModelName('balanced', 'FAST');
 
     try {
       const response = await ai.models.generateContent({
@@ -143,12 +155,13 @@ export const GeminiService = {
     scenario: string,
     players: Player[],
     mode: GameMode,
-    language: Language = 'en'
+    language: Language = 'en',
+    aiLevel: AIModelLevel = 'balanced'
   ): Promise<RoundResult> => {
     if (!apiKey) throw new Error("API Key required");
 
     const ai = getClient(apiKey);
-    const modelName = CONFIG.MODELS.SMART;
+    const modelName = getModelName(aiLevel, 'SMART');
 
     const langInstruction = language === 'ru' ? "Write the story in RUSSIAN." : "Write the story in ENGLISH.";
 

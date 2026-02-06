@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType } from './types';
+import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel } from './types';
 import { translations, t } from './i18n';
 import { DEFAULT_SETTINGS, MIN_TIME, MAX_TIME, MIN_CHARS, MAX_CHARS } from './constants';
 import { SocketService } from './services/socketService';
@@ -229,6 +229,12 @@ const App: React.FC = () => {
     setUser(updatedUser);
     
     setLoading(true);
+
+    // Validate Language Selection
+    if (!gameState.settings.storyLanguage) {
+        setErrorMsg(t('languageRequired', lang));
+        return;
+    }
 
     // Use current persisted settings + new API Key
     const lobbySettings: LobbySettings = { 
@@ -617,25 +623,61 @@ const App: React.FC = () => {
                   </div>
 
                   {/* Story Language */}
-                  <div>
-                      <div className="flex justify-between text-sm mb-2">
+                  <div className={`transition-all duration-300 ${!gameState.settings.storyLanguage && user?.isCaptain ? 'p-2 rounded-lg border-2 border-red-500/50 bg-red-500/10' : ''}`}>
+                      <div className="flex justify-between text-sm mb-2 items-center">
                           <span>{t('storyLanguage', lang)}</span>
+                          {!gameState.settings.storyLanguage && user?.isCaptain && (
+                              <span className="text-red-500 text-xs font-bold animate-pulse">Required *</span>
+                          )}
                       </div>
                       <div className="flex bg-tg-bg p-1 rounded-lg">
                           <button 
                             onClick={() => handleUpdateSettings('storyLanguage', 'en')}
                             disabled={!user?.isCaptain}
-                            className={`flex-1 py-1 text-sm rounded-md transition-colors ${gameState.settings.storyLanguage === 'en' ? 'bg-tg-button text-white' : 'text-tg-hint'}`}
+                            className={`flex-1 py-1 text-sm rounded-md transition-colors ${gameState.settings.storyLanguage === 'en' ? 'bg-tg-button text-white' : 'text-tg-hint opacity-70'}`}
                           >
                             English
                           </button>
                           <button 
                             onClick={() => handleUpdateSettings('storyLanguage', 'ru')}
                             disabled={!user?.isCaptain}
-                            className={`flex-1 py-1 text-sm rounded-md transition-colors ${gameState.settings.storyLanguage === 'ru' ? 'bg-tg-button text-white' : 'text-tg-hint'}`}
+                            className={`flex-1 py-1 text-sm rounded-md transition-colors ${gameState.settings.storyLanguage === 'ru' ? 'bg-tg-button text-white' : 'text-tg-hint opacity-70'}`}
                           >
                             Русский
                           </button>
+                      </div>
+                  </div>
+
+                  {/* AI Model Level */}
+                  <div>
+                      <div className="flex justify-between text-sm mb-2">
+                          <span className="flex items-center gap-1">
+                              {t('aiLevel', lang)}
+                              <span className="text-tg-hint text-[10px] ml-1 opacity-70">(?)</span>
+                          </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                          {(['economy', 'balanced', 'premium'] as AIModelLevel[]).map((level) => (
+                             <button
+                                key={level}
+                                onClick={() => handleUpdateSettings('aiModelLevel', level)}
+                                disabled={!user?.isCaptain}
+                                className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
+                                    ${gameState.settings.aiModelLevel === level
+                                        ? 'bg-tg-button text-white border-transparent'
+                                        : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
+                                    }
+                                    ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
+                                `}
+                             >
+                                 <span>{t(level, lang)}</span>
+                                 <span className="text-[8px] opacity-70 normal-case leading-tight max-w-full overflow-hidden text-ellipsis">
+                                     {level === 'economy' && t('economyDesc', lang)}
+                                     {level === 'balanced' && t('balancedDesc', lang)}
+                                     {level === 'premium' && t('premiumDesc', lang)}
+                                 </span>
+                             </button>
+                          ))}
                       </div>
                   </div>
               </div>

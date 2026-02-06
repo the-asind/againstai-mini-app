@@ -36,13 +36,16 @@ export interface Player {
   actionText?: string;
 }
 
+export type AIModelLevel = 'economy' | 'balanced' | 'premium';
+
 export interface LobbySettings {
   timeLimitSeconds: number; // 30 - 600
   charLimit: number; // 100 - 3000
   mode: GameMode;
   scenarioType: ScenarioType;
   apiKey: string; // Stored in session, not DB
-  storyLanguage: Language; // The language the AI generates the story in
+  storyLanguage: Language | null; // The language the AI generates the story in. Null = not selected.
+  aiModelLevel: AIModelLevel;
 }
 
 export interface GameState {

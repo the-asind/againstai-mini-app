@@ -7,7 +7,8 @@ export const DEFAULT_SETTINGS: LobbySettings = {
   mode: GameMode.COOP,
   scenarioType: ScenarioType.ANY,
   apiKey: '',
-  storyLanguage: 'en',
+  storyLanguage: null, // Force user to choose
+  aiModelLevel: 'balanced', // Default to balanced
 };
 
 export const MIN_TIME = 30;

@@ -10,5 +10,20 @@ export const CONFIG = {
   MODELS: {
     FAST: process.env.GEMINI_MODEL_FAST || 'gemini-3-flash-preview',
     SMART: process.env.GEMINI_MODEL_SMART || 'gemini-3-pro-preview'
+  },
+  // AI Levels
+  AI_LEVELS: {
+    economy: {
+        FAST: process.env.AI_LEVEL_1_FAST || 'gemini-2.0-flash-lite-preview-02-05',
+        SMART: process.env.AI_LEVEL_1_SMART || 'gemini-2.0-flash-lite-preview-02-05'
+    },
+    balanced: {
+        FAST: process.env.AI_LEVEL_2_FAST || 'gemini-3-flash-preview',
+        SMART: process.env.AI_LEVEL_2_SMART || 'gemini-3-flash-preview'
+    },
+    premium: {
+        FAST: process.env.AI_LEVEL_3_FAST || 'gemini-3-flash-preview',
+        SMART: process.env.AI_LEVEL_3_SMART || 'gemini-3-pro-preview'
+    }
   }
 };

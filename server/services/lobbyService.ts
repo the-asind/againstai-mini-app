@@ -77,11 +77,17 @@ export class LobbyService {
     this.emitUpdate(code);
 
     try {
+      // Logic bug: storyLanguage can be null in settings, but generateScenario expects Language.
+      // We validated on frontend, but TS might complain or runtime error if null passed.
+      // Safe default: 'en'
+      const lang = lobby.settings.storyLanguage || 'en';
+
       const scenario = await GeminiService.generateScenario(
         lobby.settings.apiKey,
         lobby.settings.mode,
         lobby.settings.scenarioType,
-        lobby.settings.storyLanguage
+        lang,
+        lobby.settings.aiModelLevel
       );
 
       lobby.scenario = scenario;
@@ -202,12 +208,14 @@ export class LobbyService {
          });
 
          // 3. Judge
+         const lang = lobby.settings.storyLanguage || 'en';
          const result = await GeminiService.judgeRound(
              lobby.settings.apiKey,
              lobby.scenario || "Unknown Scenario",
              lobby.players,
              lobby.settings.mode,
-             lobby.settings.storyLanguage
+             lang,
+             lobby.settings.aiModelLevel
          );
 
          // 4. Apply Results
