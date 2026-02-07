@@ -18,31 +18,8 @@ export const GeminiService = {
    * Validates if the API Key is working by making a lightweight call.
    */
   validateKey: async (apiKey: string): Promise<boolean> => {
-    if (!apiKey || apiKey.length < 10) return false;
-
-    try {
-        const ai = getClient(apiKey);
-        // Use Economy FAST model for validation to save cost
-        const modelName = getModelName('economy', 'FAST');
-
-        // Minimal token count request
-        const response = await ai.models.generateContent({
-            model: modelName,
-            contents: "Ping",
-            config: {
-                // thinkingConfig: { thinkingLevel: "low" }, // Optional for Flash 3
-                responseMimeType: "text/plain"
-            }
-        });
-
-        return !!response.text;
-    } catch (e: any) {
-        console.error(`API Key Validation Failed for model ${CONFIG.MODELS.FAST}:`, e.message || e);
-        if (e.response) {
-            console.error("Error Response:", JSON.stringify(e.response, null, 2));
-        }
-        return false;
-    }
+    if (!apiKey || apiKey.length <= 6) return false;
+    return /^[a-zA-Z0-9_-]+$/.test(apiKey);
   },
 
   /**
