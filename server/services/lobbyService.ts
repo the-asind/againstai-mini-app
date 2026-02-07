@@ -16,6 +16,13 @@ export class LobbyService {
     this.io = io;
   }
 
+  public isCaptain(code: string, playerId: string): boolean {
+    const lobby = this.lobbies.get(code);
+    if (!lobby) return false;
+    const player = lobby.players.find(p => p.id === playerId);
+    return player?.isCaptain || false;
+  }
+
   private generateCode(): string {
     let result = '';
     for (let i = 0; i < LOBBY_CODE_LENGTH; i++) {
