@@ -86,7 +86,7 @@ io.on('connection', (socket) => {
     }
 
     try {
-        const code = lobbyService.createLobby(player, settings);
+        const code = lobbyService.createLobby(player, settings, socket.id);
         socket.join(code);
         lobbyService.emitUpdate(code);
         if (callback) callback({ code });
@@ -101,7 +101,7 @@ io.on('connection', (socket) => {
         return;
     }
 
-    const success = lobbyService.joinLobby(code, player);
+    const success = lobbyService.joinLobby(code, player, socket.id);
     if (success) {
         socket.join(code);
         if (callback) callback({ success: true });
@@ -133,6 +133,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    lobbyService.handleDisconnect(user.id.toString(), socket.id);
+  });
     // Handle disconnect (optional: mark player as offline?)
   });
 });

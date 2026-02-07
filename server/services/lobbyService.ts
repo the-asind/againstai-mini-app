@@ -1,4 +1,3 @@
-
 import { Server as SocketIOServer } from 'socket.io';
 import { GameState, GameStatus, LobbySettings, Player, RoundResult, GameMode, ScenarioType } from '../../types';
 import { GeminiService } from './geminiService';
@@ -10,6 +9,7 @@ const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 export class LobbyService {
   private lobbies: Map<string, GameState> = new Map();
   private timers: Map<string, NodeJS.Timeout> = new Map();
+  private playerSockets: Map<string, Set<string>> = new Map();
   private io: SocketIOServer;
 
   constructor(io: SocketIOServer) {
@@ -33,21 +33,22 @@ export class LobbyService {
     return result;
   }
 
-  public createLobby(host: Player, settings: LobbySettings): string {
+  public createLobby(host: Player, settings: LobbySettings, socketId: string): string {
     const code = this.generateCode();
     const initialState: GameState = {
       lobbyCode: code,
-      players: [{ ...host, isCaptain: true, status: 'waiting' }],
+      players: [{ ...host, isCaptain: true, status: 'waiting', isOnline: true }],
       status: GameStatus.LOBBY_WAITING,
       settings: settings,
       scenario: null
     };
 
     this.lobbies.set(code, initialState);
+    this.playerSockets.set(host.id, new Set([socketId]));
     return code;
   }
 
-  public joinLobby(code: string, player: Player): boolean {
+  public joinLobby(code: string, player: Player, socketId: string): boolean {
     const lobby = this.lobbies.get(code);
     if (!lobby) return false;
 
@@ -55,24 +56,50 @@ export class LobbyService {
     // For now, assume simple join. If ID matches, we update name/ref.
     const existingIndex = lobby.players.findIndex(p => p.id === player.id);
     if (existingIndex !== -1) {
-        lobby.players[existingIndex] = { ...lobby.players[existingIndex], name: player.name };
+        lobby.players[existingIndex] = {
+            ...lobby.players[existingIndex],
+            name: player.name,
+            isOnline: true
+        };
     } else {
         if (lobby.status !== GameStatus.LOBBY_WAITING && lobby.status !== GameStatus.LOBBY_SETUP) {
             // Can't join mid-game (unless we want to support spectators?)
             return false;
         }
-        lobby.players.push({ ...player, isCaptain: false, status: 'waiting' });
+        lobby.players.push({ ...player, isCaptain: false, status: 'waiting', isOnline: true });
     }
+
+    // Track socket
+    if (!this.playerSockets.has(player.id)) {
+        this.playerSockets.set(player.id, new Set());
+    }
+    this.playerSockets.get(player.id)!.add(socketId);
 
     this.emitUpdate(code);
     return true;
   }
 
-  private isCaptain(code: string, playerId: string): boolean {
-    const lobby = this.lobbies.get(code);
-    if (!lobby) return false;
-    const player = lobby.players.find(p => p.id === playerId);
-    return !!player?.isCaptain;
+  public handleDisconnect(playerId: string, socketId: string) {
+    const userSockets = this.playerSockets.get(playerId);
+    if (userSockets) {
+        userSockets.delete(socketId);
+        if (userSockets.size === 0) {
+            // User is fully offline
+            this.setPlayerOffline(playerId);
+        }
+    }
+  }
+
+  private setPlayerOffline(playerId: string) {
+      // Inefficient but safe for mini-app: find which lobby this player is in
+      for (const [code, lobby] of this.lobbies.entries()) {
+          const player = lobby.players.find(p => p.id === playerId);
+          if (player) {
+              player.isOnline = false;
+              this.emitUpdate(code);
+              break; // Player can only be in one lobby? Assume yes.
+          }
+      }
   }
 
   public updateSettings(code: string, playerId: string, settings: Partial<LobbySettings>) {

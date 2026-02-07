@@ -1,4 +1,3 @@
-
 import { io, Socket } from 'socket.io-client';
 import { GameState, LobbySettings, Player, GameStatus } from '../types';
 
@@ -10,6 +9,10 @@ class SocketServiceImpl {
   private socket: Socket | null = null;
   private subscribers: GameStateCallback[] = [];
 
+  // Session State for Reconnection
+  private currentLobbyCode: string | null = null;
+  private currentPlayer: Player | null = null;
+
   public connect() {
     if (this.socket) return;
 
@@ -20,6 +23,17 @@ class SocketServiceImpl {
         initData: initData
       },
       transports: ['websocket', 'polling'] // Add polling fallback
+    });
+
+    this.socket.on('connect', () => {
+        // Auto-rejoin if session exists (e.g. after temporary disconnect)
+        if (this.currentLobbyCode && this.currentPlayer) {
+            console.log("Reconnecting to lobby:", this.currentLobbyCode);
+            this.socket?.emit('join_lobby', {
+                code: this.currentLobbyCode,
+                player: this.currentPlayer
+            });
+        }
     });
 
     this.socket.on('connect_error', (err) => {
@@ -61,8 +75,14 @@ class SocketServiceImpl {
       this.connect(); // Ensure connection
       return new Promise((resolve, reject) => {
           this.socket?.emit('create_lobby', { player, settings }, (response: { code?: string, error?: string }) => {
-              if (response.error) reject(response.error);
-              else resolve(response.code!);
+              if (response.error) {
+                  reject(response.error);
+              } else {
+                  // Save session state
+                  this.currentLobbyCode = response.code!;
+                  this.currentPlayer = player;
+                  resolve(response.code!);
+              }
           });
       });
   }
@@ -75,6 +95,9 @@ class SocketServiceImpl {
                   console.error(response.error);
                   resolve(false);
               } else {
+                  // Save session state
+                  this.currentLobbyCode = code;
+                  this.currentPlayer = player;
                   resolve(true);
               }
           });
@@ -102,6 +125,10 @@ class SocketServiceImpl {
       if (this.socket) {
           this.socket.disconnect();
           this.socket = null;
+          // Clear session state? Maybe keep it if we want to support manual reconnect later?
+          // For now, let's clear it to be safe.
+          this.currentLobbyCode = null;
+          this.currentPlayer = null;
       }
   }
 }
