@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    container_name: against-ai-app
+    restart: always
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - PORT=3000
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - GEMINI_MODEL_FAST=${GEMINI_MODEL_FAST:-gemini-3-flash-preview}
+      - GEMINI_MODEL_SMART=${GEMINI_MODEL_SMART:-gemini-3-pro-preview}
+      # Proxy Configuration (passed from .env)
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}

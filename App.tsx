@@ -1,10 +1,9 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType } from './types';
+import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel } from './types';
 import { translations, t } from './i18n';
-import { DEFAULT_SETTINGS, MOCK_BOT_DELAY_MS, MIN_TIME, MAX_TIME, MIN_CHARS, MAX_CHARS } from './constants';
-import { MockBackend } from './services/mockBackendService';
-import { GeminiService } from './services/geminiService';
+import { DEFAULT_SETTINGS, MIN_TIME, MAX_TIME, MIN_CHARS, MAX_CHARS } from './constants';
+import { SocketService } from './services/socketService';
 import { Button } from './components/Button';
 import { Input } from './components/Input';
 import { CodeInput } from './components/CodeInput';
@@ -63,7 +62,7 @@ const App: React.FC = () => {
   const [actionInput, setActionInput] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<RoundResult | null>(null);
+  // Removed local result state, using gameState.roundResult
   
   // Toast State
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
@@ -142,7 +141,20 @@ const App: React.FC = () => {
         setLang('ru');
     }
 
-    // Deep Linking Check
+    // Subscribe to Socket Updates
+    const unsubscribe = SocketService.subscribe((newState) => {
+      setGameState((prevState) => {
+        // Handle Transition to Input: Reset Timer locally
+        // We use prevState to avoid closure staleness issues
+        if (newState.status === GameStatus.PLAYER_INPUT && prevState.status !== GameStatus.PLAYER_INPUT) {
+            timeLeftRef.current = newState.settings.timeLimitSeconds;
+            setTimeLeftDisplay(newState.settings.timeLimitSeconds);
+        }
+        return newState;
+      });
+    });
+
+    // Deep Linking Check (Delayed to ensure socket connection or handled in connect)
     if (initData.start_param) {
       const playerObj = { 
         id: userId, 
@@ -150,13 +162,10 @@ const App: React.FC = () => {
         isCaptain: false, 
         status: 'waiting' as const 
       };
+      // We need to wait for user to be set/connection to be established?
+      // Actually we can just call join. SocketService handles connection.
       handleJoinLobby(initData.start_param, playerObj);
     }
-
-    // Subscribe to Mock Backend
-    const unsubscribe = MockBackend.subscribe((newState) => {
-      setGameState(newState);
-    });
 
     return () => unsubscribe();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -221,13 +230,33 @@ const App: React.FC = () => {
     
     setLoading(true);
 
+    // Validate Language Selection
+    if (!gameState.settings.storyLanguage) {
+        setErrorMsg(t('languageRequired', lang));
+        return;
+    }
+
     // Use current persisted settings + new API Key
     const lobbySettings: LobbySettings = { 
       ...gameState.settings, // Use current state settings (which were loaded from LS)
       apiKey: cleanKey 
     };
-    
-    await MockBackend.createLobby(updatedUser, lobbySettings);
+
+    setLoading(true);
+
+    try {
+        // Validate Key First
+        const isValid = await SocketService.validateApiKey(cleanKey);
+        if (!isValid) {
+            setErrorMsg(t('errorApiKey', lang)); // Re-use generic error or create specific
+            setLoading(false);
+            return;
+        }
+
+        await SocketService.createLobby(updatedUser, lobbySettings);
+    } catch (e: any) {
+        setErrorMsg(e.toString());
+    }
     setLoading(false);
   };
 
@@ -248,7 +277,7 @@ const App: React.FC = () => {
     setErrorMsg('');
     setLoading(true);
     
-    const success = await MockBackend.joinLobby(code, playerObj);
+    const success = await SocketService.joinLobby(code, playerObj);
     if (!success) {
         setErrorMsg(t('lobbyNotFound', lang));
         triggerHaptic('error');
@@ -257,8 +286,10 @@ const App: React.FC = () => {
   };
 
   const handleUpdateSettings = (key: keyof LobbySettings, value: any) => {
-      // 1. Update Backend (updates local State via subscription)
-      MockBackend.updateSettings({ [key]: value });
+      // 1. Update Backend
+      if (gameState.lobbyCode) {
+         SocketService.updateSettings(gameState.lobbyCode, { [key]: value });
+      }
       
       // 2. Persist to Local Storage (Merge with current)
       const newSettings = { ...gameState.settings, [key]: value };
@@ -280,28 +311,8 @@ const App: React.FC = () => {
   };
 
   const handleStartGame = async () => {
-    if (!gameState.settings.apiKey) return;
-    
-    MockBackend.updateStatus(GameStatus.SCENARIO_GENERATION);
-    
-    try {
-      const scenario = await GeminiService.generateScenario(
-        gameState.settings.apiKey, 
-        gameState.settings.mode,
-        gameState.settings.scenarioType
-      );
-      
-      MockBackend.setScenario(scenario);
-      MockBackend.updateStatus(GameStatus.PLAYER_INPUT);
-      
-      timeLeftRef.current = gameState.settings.timeLimitSeconds;
-      setTimeLeftDisplay(gameState.settings.timeLimitSeconds);
-      
-    } catch (error) {
-      console.error(error);
-      setErrorMsg("Failed to generate scenario. Check API Key.");
-      MockBackend.updateStatus(GameStatus.LOBBY_WAITING);
-    }
+    if (!gameState.lobbyCode) return;
+    SocketService.startGame(gameState.lobbyCode);
   };
 
   // Timer Logic
@@ -314,31 +325,20 @@ const App: React.FC = () => {
         
         if (timeLeftRef.current <= 0) {
            clearInterval(interval);
-           const currentUser = gameState.players.find(p => p.id === user?.id);
-           if (currentUser && currentUser.status !== 'ready') {
-             handleSubmitAction(true);
+           // Auto-submit logic is handled by server timeout.
+           // But we can submit partial text if we want to be safe.
+           if (actionInput.trim()) {
+               handleSubmitAction(true);
            }
         }
       }, 1000);
     }
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameState.status, user]);
-
-  // Check if everyone is ready
-  useEffect(() => {
-    if (gameState.status === GameStatus.PLAYER_INPUT) {
-        const allReady = gameState.players.every(p => p.status === 'ready');
-        if (allReady) {
-            handleJudgement();
-        }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameState.players, gameState.status]);
-
+  }, [gameState.status]);
 
   const handleSubmitAction = async (force = false) => {
-    if (!user || !gameState.settings.apiKey) return;
+    if (!user || !gameState.lobbyCode) return;
     
     let currentInput = actionInput.trim();
 
@@ -350,60 +350,19 @@ const App: React.FC = () => {
         if (!currentInput) {
             currentInput = t('frozenInFear', lang);
         }
-    }
-    
-    const cheatResult = await GeminiService.checkInjection(
-        gameState.settings.apiKey, 
-        currentInput
-    );
-
-    if (cheatResult.isCheat) {
-        triggerHaptic('error');
-        if (force) {
-            currentInput = "Attempts to cheat reality, but fails miserably.";
-        } else {
-             setErrorMsg(`${t('injectDetected', lang)} (${cheatResult.reason})`);
-             setLoading(false);
-             return;
-        }
-    }
-
-    if (force) {
         currentInput += t('timeOutNote', lang);
     }
-
-    await MockBackend.submitAction(user.id, currentInput);
+    
+    // Server performs cheat detection now
+    SocketService.submitAction(gameState.lobbyCode, currentInput);
     setLoading(false);
   };
 
-  const handleJudgement = async () => {
-    if (gameState.status === GameStatus.JUDGING) return;
-    MockBackend.updateStatus(GameStatus.JUDGING);
-    
-    try {
-        const outputLang = gameState.settings.storyLanguage || 'en';
-        const roundResult = await GeminiService.judgeRound(
-            gameState.settings.apiKey,
-            gameState.scenario || "",
-            gameState.players,
-            outputLang,
-            gameState.settings.mode
-        );
-        
-        setResult(roundResult);
-        MockBackend.applyResults(roundResult.survivors);
-        MockBackend.updateStatus(GameStatus.RESULTS);
-    } catch (e) {
-        console.error("Critical error in judging:", e);
-         MockBackend.updateStatus(GameStatus.RESULTS);
-    }
-  };
-
   const handleRestart = () => {
-      setResult(null);
+      if (!gameState.lobbyCode) return;
       setActionInput("");
       setErrorMsg("");
-      MockBackend.resetGame();
+      SocketService.resetGame(gameState.lobbyCode);
   };
 
   // -- Renders --
@@ -568,51 +527,47 @@ const App: React.FC = () => {
                       <div className="flex justify-between text-sm mb-2">
                           <span>{t('gameMode', lang)}</span>
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="flex flex-col gap-2">
                           {Object.values(GameMode).map((mode) => (
                              <button
                                 key={mode}
                                 onClick={() => handleUpdateSettings('mode', mode)}
                                 disabled={!user?.isCaptain}
-                                className={`py-2 text-[10px] font-bold uppercase rounded-lg border transition-all flex items-center justify-center text-center
+                                className={`p-3 rounded-lg border transition-all text-left group
                                     ${gameState.settings.mode === mode 
                                         ? 'bg-tg-button text-white border-transparent' 
-                                        : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
+                                        : 'bg-tg-bg text-tg-text border-tg-hint/10 hover:bg-tg-bg/80'
                                     }
                                     ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
                                 `}
                              >
-                                 {mode === GameMode.COOP && t('coop', lang)}
-                                 {mode === GameMode.PVP && t('pvp', lang)}
-                                 {mode === GameMode.BATTLE_ROYALE && t('battleRoyale', lang)}
+                                 <div className="text-xs font-bold uppercase mb-1">
+                                     {mode === GameMode.COOP && t('coop', lang)}
+                                     {mode === GameMode.PVP && t('pvp', lang)}
+                                     {mode === GameMode.BATTLE_ROYALE && t('battleRoyale', lang)}
+                                 </div>
+                                 <div className={`text-[10px] leading-relaxed ${gameState.settings.mode === mode ? 'text-white/80' : 'text-tg-hint'}`}>
+                                     {mode === GameMode.COOP && t('coopDesc', lang)}
+                                     {mode === GameMode.PVP && t('pvpDesc', lang)}
+                                     {mode === GameMode.BATTLE_ROYALE && t('battleRoyaleDesc', lang)}
+                                 </div>
                              </button>
                           ))}
                       </div>
                   </div>
 
-                  {/* Scenario Type Selector (Horizontal Scroll with Drag & Touch Support) */}
+                  {/* Scenario Type Selector (Wrapped Grid) */}
                   <div className="mb-4">
                       <div className="flex justify-between text-sm mb-2">
                           <span>{t('scenarioType', lang)}</span>
                       </div>
-                      <div 
-                        ref={scrollContainerRef}
-                        className={`flex gap-2 overflow-x-auto pb-2 no-scrollbar ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} select-none`}
-                        onMouseDown={handleMouseDown}
-                        onMouseLeave={handleMouseLeave}
-                        onMouseUp={handleMouseUp}
-                        onMouseMove={handleMouseMove}
-                        // Removed style={{ scrollBehavior: 'smooth' }} to allow fluid finger scrolling
-                      >
+                      <div className="flex flex-wrap gap-2 justify-center">
                           {Object.values(ScenarioType).map((type) => (
                              <button
                                 key={type}
-                                onClick={() => {
-                                    // Prevent click if we were just dragging
-                                    if (!isDragging) handleUpdateSettings('scenarioType', type);
-                                }}
+                                onClick={() => handleUpdateSettings('scenarioType', type)}
                                 disabled={!user?.isCaptain}
-                                className={`flex-shrink-0 px-4 py-2 text-xs font-bold uppercase rounded-full border transition-all whitespace-nowrap pointer-events-auto
+                                className={`px-4 py-2 text-xs font-bold uppercase rounded-full border transition-all
                                     ${gameState.settings.scenarioType === type 
                                         ? 'bg-tg-button text-white border-transparent' 
                                         : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
@@ -664,25 +619,58 @@ const App: React.FC = () => {
                   </div>
 
                   {/* Story Language */}
-                  <div>
-                      <div className="flex justify-between text-sm mb-2">
+                  <div className={`transition-all duration-300 ${!gameState.settings.storyLanguage && user?.isCaptain ? 'p-2 rounded-lg border-2 border-red-500/50 bg-red-500/10' : ''}`}>
+                      <div className="flex justify-between text-sm mb-2 items-center">
                           <span>{t('storyLanguage', lang)}</span>
+                          {!gameState.settings.storyLanguage && user?.isCaptain && (
+                              <span className="text-red-500 text-xs font-bold animate-pulse">Required *</span>
+                          )}
                       </div>
                       <div className="flex bg-tg-bg p-1 rounded-lg">
                           <button 
                             onClick={() => handleUpdateSettings('storyLanguage', 'en')}
                             disabled={!user?.isCaptain}
-                            className={`flex-1 py-1 text-sm rounded-md transition-colors ${gameState.settings.storyLanguage === 'en' ? 'bg-tg-button text-white' : 'text-tg-hint'}`}
+                            className={`flex-1 py-1 text-sm rounded-md transition-colors ${gameState.settings.storyLanguage === 'en' ? 'bg-tg-button text-white' : 'text-tg-hint opacity-70'}`}
                           >
                             English
                           </button>
                           <button 
                             onClick={() => handleUpdateSettings('storyLanguage', 'ru')}
                             disabled={!user?.isCaptain}
-                            className={`flex-1 py-1 text-sm rounded-md transition-colors ${gameState.settings.storyLanguage === 'ru' ? 'bg-tg-button text-white' : 'text-tg-hint'}`}
+                            className={`flex-1 py-1 text-sm rounded-md transition-colors ${gameState.settings.storyLanguage === 'ru' ? 'bg-tg-button text-white' : 'text-tg-hint opacity-70'}`}
                           >
                             Русский
                           </button>
+                      </div>
+                  </div>
+
+                  {/* AI Model Level */}
+                  <div>
+                      <div className="flex justify-between text-sm mb-2">
+                          <span>{t('aiLevel', lang)}</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                          {(['economy', 'balanced', 'premium'] as AIModelLevel[]).map((level) => (
+                             <button
+                                key={level}
+                                onClick={() => handleUpdateSettings('aiModelLevel', level)}
+                                disabled={!user?.isCaptain}
+                                className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
+                                    ${gameState.settings.aiModelLevel === level
+                                        ? 'bg-tg-button text-white border-transparent'
+                                        : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
+                                    }
+                                    ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
+                                `}
+                             >
+                                 <span>{t(level, lang)}</span>
+                                 <span className="text-[8px] opacity-70 normal-case leading-tight max-w-full overflow-hidden text-ellipsis">
+                                     {level === 'economy' && t('economyDesc', lang)}
+                                     {level === 'balanced' && t('balancedDesc', lang)}
+                                     {level === 'premium' && t('premiumDesc', lang)}
+                                 </span>
+                             </button>
+                          ))}
                       </div>
                   </div>
               </div>
@@ -782,19 +770,19 @@ const App: React.FC = () => {
      );
   }
 
-  if (gameState.status === GameStatus.RESULTS && result) {
+  if (gameState.status === GameStatus.RESULTS && gameState.roundResult) {
       return (
           <div className="min-h-screen flex flex-col p-4">
               <h2 className="text-3xl font-black mb-6 text-center">RESULTS</h2>
               
               <div className="bg-tg-secondaryBg p-5 rounded-2xl mb-6 shadow-lg border border-tg-hint/10">
-                  <p className="leading-relaxed whitespace-pre-wrap">{result.story}</p>
+                  <p className="leading-relaxed whitespace-pre-wrap">{gameState.roundResult.story}</p>
               </div>
 
               <div className="space-y-3 mb-8">
                   <h3 className="text-sm font-bold text-tg-hint uppercase">Status Report</h3>
                   {gameState.players.map(p => {
-                      const isDead = result.deaths.find(d => d.playerId === p.id);
+                      const isDead = gameState.roundResult!.deaths.find(d => d.playerId === p.id);
                       return (
                           <div key={p.id} className={`flex items-center justify-between p-3 rounded-lg border ${isDead ? 'border-red-900 bg-red-900/10' : 'border-green-900 bg-green-900/10'}`}>
                               <span className="font-bold">{p.name}</span>

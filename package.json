@@ -6,16 +6,29 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start:server": "ts-node --project tsconfig.server.json server/index.ts",
+    "dev:server": "ts-node-dev --project tsconfig.server.json --respawn --transpile-only server/index.ts"
   },
   "dependencies": {
-    "@google/genai": "^1.38.0",
+    "@google/genai": "^1.40.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "react": "^19.2.3"
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "undici": "^7.20.0"
   },
   "devDependencies": {
-    "@types/node": "^22.14.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.19.8",
+    "@types/socket.io": "^3.0.1",
     "@vitejs/plugin-react": "^5.0.0",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }
