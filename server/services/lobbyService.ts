@@ -61,17 +61,24 @@ export class LobbyService {
     return true;
   }
 
-  public updateSettings(code: string, settings: Partial<LobbySettings>) {
+  private isCaptain(code: string, playerId: string): boolean {
     const lobby = this.lobbies.get(code);
-    if (!lobby) return;
+    if (!lobby) return false;
+    const player = lobby.players.find(p => p.id === playerId);
+    return !!player?.isCaptain;
+  }
+
+  public updateSettings(code: string, playerId: string, settings: Partial<LobbySettings>) {
+    if (!this.isCaptain(code, playerId)) return;
+    const lobby = this.lobbies.get(code)!;
 
     lobby.settings = { ...lobby.settings, ...settings };
     this.emitUpdate(code);
   }
 
-  public async startGame(code: string) {
-    const lobby = this.lobbies.get(code);
-    if (!lobby) return;
+  public async startGame(code: string, playerId: string) {
+    if (!this.isCaptain(code, playerId)) return;
+    const lobby = this.lobbies.get(code)!;
 
     lobby.status = GameStatus.SCENARIO_GENERATION;
     this.emitUpdate(code);
@@ -243,9 +250,9 @@ export class LobbyService {
      }
   }
 
-  public resetGame(code: string) {
-      const lobby = this.lobbies.get(code);
-      if (!lobby) return;
+  public resetGame(code: string, playerId: string) {
+      if (!this.isCaptain(code, playerId)) return;
+      const lobby = this.lobbies.get(code)!;
 
       lobby.status = GameStatus.LOBBY_WAITING;
       lobby.scenario = null;
