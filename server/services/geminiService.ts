@@ -4,7 +4,7 @@ import { CONFIG } from "../config";
 import { SYSTEM_INSTRUCTIONS } from "../prompts";
 import { GameMode, ScenarioType, Player, RoundResult, Language, AIModelLevel } from "../../types";
 
-// We rely on the global fetch patch in server/index.ts to handle proxying
+// We rely on the global fetch patch (initialized in server/index.ts) to handle proxying
 const getClient = (apiKey: string) => new GoogleGenAI({ apiKey: apiKey.trim() });
 
 // Helper to pick model based on level
