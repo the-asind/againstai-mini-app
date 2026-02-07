@@ -111,14 +111,15 @@ io.on('connection', (socket) => {
   });
 
   socket.on('update_settings', ({ code, settings }: { code: string, settings: Partial<LobbySettings> }) => {
-     // TODO: Check if user is captain?
-     // LobbyService doesn't expose `isCaptain` check easily without fetching state.
-     // For now we trust the client, but ideally we should verify host.
-     lobbyService.updateSettings(code, settings);
+     if (lobbyService.isCaptain(code, user.id.toString())) {
+         lobbyService.updateSettings(code, settings);
+     }
   });
 
   socket.on('start_game', ({ code }: { code: string }) => {
-      lobbyService.startGame(code);
+      if (lobbyService.isCaptain(code, user.id.toString())) {
+          lobbyService.startGame(code);
+      }
   });
 
   socket.on('submit_action', ({ code, action }: { code: string, action: string }) => {
@@ -126,7 +127,9 @@ io.on('connection', (socket) => {
   });
 
   socket.on('reset_game', ({ code }: { code: string }) => {
-      lobbyService.resetGame(code);
+      if (lobbyService.isCaptain(code, user.id.toString())) {
+          lobbyService.resetGame(code);
+      }
   });
 
   socket.on('disconnect', () => {
