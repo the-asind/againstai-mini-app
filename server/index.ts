@@ -1,4 +1,3 @@
-
 import express from 'express';
 import path from 'path';
 import { createServer } from 'http';
@@ -10,6 +9,7 @@ import { GeminiService } from './services/geminiService';
 import { validateTelegramData, TelegramUser } from './utils/telegramAuth';
 import { LobbySettings, Player } from '../types';
 import { setupProxy } from './utils/proxy';
+import { cleanupOldImages } from './utils/imageStorage';
 
 // Initialize proxy for global fetch (required for Gemini SDK behind some proxies)
 setupProxy();
@@ -41,6 +41,10 @@ declare module 'socket.io' {
     telegramUser?: TelegramUser;
   }
 }
+
+// Start Image Cleanup Task (run every 1 hour)
+cleanupOldImages(); // Initial run
+setInterval(cleanupOldImages, 60 * 60 * 1000);
 
 // Middleware: Strict Authentication
 io.use((socket, next) => {
