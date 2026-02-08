@@ -1,7 +1,8 @@
 import { Server as SocketIOServer } from 'socket.io';
-import { GameState, GameStatus, LobbySettings, Player, RoundResult, GameMode, ScenarioType } from '../../types';
+import { GameState, GameStatus, LobbySettings, Player, RoundResult, GameMode, ScenarioType, ImageGenerationMode } from '../../types';
 import { GeminiService } from './geminiService';
 import { CONFIG } from '../config';
+import { saveImage } from '../utils/imageStorage';
 
 const LOBBY_CODE_LENGTH = 6;
 const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -28,7 +29,6 @@ export class LobbyService {
     for (let i = 0; i < LOBBY_CODE_LENGTH; i++) {
       result += CHARS.charAt(Math.floor(Math.random() * CHARS.length));
     }
-    // Recursively ensure uniqueness (though collision prob is low)
     if (this.lobbies.has(result)) return this.generateCode();
     return result;
   }
@@ -52,8 +52,6 @@ export class LobbyService {
     const lobby = this.lobbies.get(code);
     if (!lobby) return false;
 
-    // Reconnect logic: if player ID exists, update socket/status?
-    // For now, assume simple join. If ID matches, we update name/ref.
     const existingIndex = lobby.players.findIndex(p => p.id === player.id);
     if (existingIndex !== -1) {
         lobby.players[existingIndex] = {
@@ -63,13 +61,11 @@ export class LobbyService {
         };
     } else {
         if (lobby.status !== GameStatus.LOBBY_WAITING && lobby.status !== GameStatus.LOBBY_SETUP) {
-            // Can't join mid-game (unless we want to support spectators?)
             return false;
         }
         lobby.players.push({ ...player, isCaptain: false, status: 'waiting', isOnline: true });
     }
 
-    // Track socket
     if (!this.playerSockets.has(player.id)) {
         this.playerSockets.set(player.id, new Set());
     }
@@ -84,20 +80,18 @@ export class LobbyService {
     if (userSockets) {
         userSockets.delete(socketId);
         if (userSockets.size === 0) {
-            // User is fully offline
             this.setPlayerOffline(playerId);
         }
     }
   }
 
   private setPlayerOffline(playerId: string) {
-      // Inefficient but safe for mini-app: find which lobby this player is in
       for (const [code, lobby] of this.lobbies.entries()) {
           const player = lobby.players.find(p => p.id === playerId);
           if (player) {
               player.isOnline = false;
               this.emitUpdate(code);
-              break; // Player can only be in one lobby? Assume yes.
+              break;
           }
       }
   }
@@ -118,9 +112,6 @@ export class LobbyService {
     this.emitUpdate(code);
 
     try {
-      // Logic bug: storyLanguage can be null in settings, but generateScenario expects Language.
-      // We validated on frontend, but TS might complain or runtime error if null passed.
-      // Safe default: 'en'
       const lang = lobby.settings.storyLanguage || 'en';
 
       const scenario = await GeminiService.generateScenario(
@@ -132,11 +123,25 @@ export class LobbyService {
       );
 
       lobby.scenario = scenario;
+
+      // Image Generation (SCENARIO)
+      if (lobby.settings.imageGenerationMode !== ImageGenerationMode.NONE) {
+          try {
+             const prompt = `Create a 16:9 cinematic realistic image visualizing this scene: ${scenario}`;
+             const base64 = await GeminiService.generateImage(lobby.settings.apiKey, prompt);
+             if (base64) {
+                 const url = await saveImage(base64);
+                 lobby.scenarioImage = url;
+             }
+          } catch (e) {
+             console.error("Scenario Image Gen Failed:", e);
+          }
+      }
+
       this.startRound(code);
 
     } catch (e) {
       console.error(`Lobby ${code} Start Error:`, e);
-      // Revert to waiting or show error
       lobby.status = GameStatus.LOBBY_WAITING;
       this.io.to(code).emit('error', { message: "Failed to generate scenario. Check API Key." });
       this.emitUpdate(code);
@@ -149,7 +154,6 @@ export class LobbyService {
 
     lobby.status = GameStatus.PLAYER_INPUT;
 
-    // Reset player statuses
     lobby.players.forEach(p => {
         p.status = 'waiting';
         p.actionText = undefined;
@@ -157,10 +161,8 @@ export class LobbyService {
 
     this.emitUpdate(code);
 
-    // Start Timer
     const timeLimitMs = (lobby.settings.timeLimitSeconds || 120) * 1000;
 
-    // Clear existing timer if any
     if (this.timers.has(code)) clearTimeout(this.timers.get(code)!);
 
     const timer = setTimeout(() => {
@@ -177,27 +179,14 @@ export class LobbyService {
     const player = lobby.players.find(p => p.id === playerId);
     if (!player) return;
 
-    // Check injection immediately? Or wait for batch?
-    // Description says "After all submitted OR timer ends... fast model checks".
-    // So we just store it for now.
-    // However, to give immediate feedback to user like "Action Accepted", we just store it.
-
     player.actionText = action;
     player.status = 'ready';
 
     this.emitUpdate(code);
 
-    // Check if all ready
-    const allReady = lobby.players.every(p => p.status === 'ready' || p.status === 'dead'); // Dead players don't act?
-    // Wait, in new round, dead players might be out.
-    // If we support elimination, we should filter `status === 'alive'`?
-    // Current types: status: 'alive' | 'dead' | 'waiting' | 'ready'.
-    // Logic: Only 'waiting' players need to submit.
-
     const waitingSurvivors = lobby.players.filter(p => p.status === 'waiting');
 
     if (waitingSurvivors.length === 0) {
-        // All done
         this.resolveRound(code);
     }
   }
@@ -206,7 +195,6 @@ export class LobbyService {
      const lobby = this.lobbies.get(code);
      if (!lobby) return;
 
-     // Force submit for anyone waiting
      lobby.players.forEach(p => {
          if (p.status === 'waiting') {
              p.actionText = p.actionText || "Frozen in fear, doing nothing.";
@@ -229,26 +217,6 @@ export class LobbyService {
      this.emitUpdate(code);
 
      try {
-         // 1. Check for Cheating (Parallel)
-         // const cheatChecks = await Promise.all(
-         //     lobby.players.map(async (p) => {
-         //         if (!p.actionText) return { id: p.id, isCheat: false };
-         //         const check = await GeminiService.checkInjection(lobby.settings.apiKey, p.actionText);
-         //         return { id: p.id, ...check };
-         //     })
-         // );
-
-         // 2. Annotate Actions
-         // cheatChecks.forEach(check => {
-         //     if (check.isCheat) {
-         //         const p = lobby.players.find(pl => pl.id === check.id);
-         //         if (p) {
-         //             p.actionText = `[ATTEMPTED CHEAT: ${check.reason}] ${p.actionText}`;
-         //         }
-         //     }
-         // });
-
-         // 3. Judge
          const lang = lobby.settings.storyLanguage || 'en';
          const result = await GeminiService.judgeRound(
              lobby.settings.apiKey,
@@ -259,16 +227,28 @@ export class LobbyService {
              lobby.settings.aiModelLevel
          );
 
-         // 4. Apply Results
+         // Image Generation (RESULTS)
+         if (lobby.settings.imageGenerationMode === ImageGenerationMode.FULL) {
+             try {
+                 const prompt = `Create a 16:9 cinematic realistic image visualizing the aftermath: ${result.story}. Action of each hero separately (black silhouettes), collage in one row.`;
+                 const base64 = await GeminiService.generateImage(lobby.settings.apiKey, prompt);
+                 if (base64) {
+                     const url = await saveImage(base64);
+                     result.image = url;
+                 }
+             } catch (e) {
+                 console.error("Result Image Gen Failed:", e);
+             }
+         } else if (lobby.settings.imageGenerationMode === ImageGenerationMode.SCENARIO) {
+             result.image = lobby.scenarioImage;
+         }
+
          lobby.roundResult = result;
          lobby.status = GameStatus.RESULTS;
 
-         // Update alive/dead status
          lobby.players.forEach(p => {
              if (result.survivors.includes(p.id)) {
-                 p.status = 'alive'; // Or 'ready' -> 'alive'?
-                 // In next round they go back to waiting.
-                 // For results screen, 'alive' is good.
+                 p.status = 'alive';
              } else {
                  p.status = 'dead';
              }
@@ -278,7 +258,7 @@ export class LobbyService {
 
      } catch (e) {
          console.error(`Lobby ${code} Judge Error:`, e);
-         lobby.status = GameStatus.PLAYER_INPUT; // Revert? Or fail?
+         lobby.status = GameStatus.PLAYER_INPUT;
          this.io.to(code).emit('error', { message: "Judging failed." });
          this.emitUpdate(code);
      }
@@ -290,6 +270,7 @@ export class LobbyService {
 
       lobby.status = GameStatus.LOBBY_WAITING;
       lobby.scenario = null;
+      lobby.scenarioImage = undefined;
       lobby.roundResult = undefined;
       lobby.players.forEach(p => {
           p.status = 'waiting';

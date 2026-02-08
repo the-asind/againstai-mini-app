@@ -1,5 +1,4 @@
-
-import { GameMode, LobbySettings, ScenarioType } from "./types";
+import { GameMode, LobbySettings, ScenarioType, ImageGenerationMode } from "./types";
 
 export const DEFAULT_SETTINGS: LobbySettings = {
   timeLimitSeconds: 120,
@@ -9,6 +8,7 @@ export const DEFAULT_SETTINGS: LobbySettings = {
   apiKey: '',
   storyLanguage: null, // Force user to choose
   aiModelLevel: 'balanced', // Default to balanced
+  imageGenerationMode: ImageGenerationMode.NONE
 };
 
 export const MIN_TIME = 30;

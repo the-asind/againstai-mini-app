@@ -1,5 +1,4 @@
 
-
 import { Language } from "./types";
 
 export const translations = {
@@ -62,6 +61,13 @@ export const translations = {
     linkCopied: "Link copied to clipboard!",
     frozenInFear: "Stood frozen in fear, unable to react.",
     timeOutNote: " (System: Player ran out of time and could not complete their thought)",
+    imageGenerationMode: "Image Generation",
+    imgNone: "None",
+    imgScenario: "Scenario Only",
+    imgFull: "Full Experience",
+    imgNoneDesc: "Text only",
+    imgScenarioDesc: "Visualize the situation",
+    imgFullDesc: "Visualize situation & results",
   },
   ru: {
     createLobby: "Создать лобби",
@@ -122,6 +128,13 @@ export const translations = {
     linkCopied: "Ссылка скопирована!",
     frozenInFear: "В страхе замер на месте, не в силах пошевелиться.",
     timeOutNote: " (Система: Игрок не успел закончить мысль до истечения времени)",
+    imageGenerationMode: "Генерация изображений",
+    imgNone: "Нет",
+    imgScenario: "Только сценарий",
+    imgFull: "Полная визуализация",
+    imgNoneDesc: "Только текст",
+    imgScenarioDesc: "Картинка ситуации",
+    imgFullDesc: "Сценарий и Итоги",
   }
 };
 

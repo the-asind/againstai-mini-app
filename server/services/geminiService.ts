@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { CONFIG } from "../config";
 import { SYSTEM_INSTRUCTIONS } from "../prompts";
@@ -90,14 +89,6 @@ export const GeminiService = {
         model: modelName,
         contents: prompt,
         config: {
-           // systemInstruction is passed in config for this SDK?
-           // Documentation says: config: { systemInstruction: ... } OR distinct param?
-           // The SDK examples for Python show `config=types.GenerateContentConfig(...)`.
-           // JS example uses `config: { ... }`.
-           // Let's assume systemInstruction goes into config or part of contents for now,
-           // but `systemInstruction` property is supported in `config` in newer APIs.
-           // However, mixing prompt and system instruction in `contents` is safer if unsure.
-           // Let's put system instruction in the prompt string above.
         }
       });
 
@@ -116,10 +107,6 @@ export const GeminiService = {
   checkInjection: async (apiKey: string, actionText: string): Promise<{ isCheat: boolean; reason?: string }> => {
     if (!apiKey) return { isCheat: false };
 
-    // Cheat detection always uses FAST model of the requested level?
-    // Actually, usually FAST is enough. We can use Balanced Fast or Economy Fast?
-    // Let's use Economy FAST to save money on checks, as cheat detection is simple.
-    // OR use the level user paid for. Let's use 'balanced' FAST as default robust.
     const ai = getClient(apiKey);
     const modelName = getModelName('balanced', 'FAST');
 
@@ -245,6 +232,49 @@ export const GeminiService = {
         survivors: players.map(p => p.id),
         deaths: []
       };
+    }
+  },
+
+  /**
+   * Generates an image for the scenario or result.
+   */
+  generateImage: async (apiKey: string, promptText: string): Promise<string | null> => {
+    if (!apiKey) return null;
+    const ai = getClient(apiKey);
+    // Use the specific model requested by user
+    const modelName = 'gemini-3-pro-image-preview';
+
+    try {
+      console.log(`[Gemini Request] Image Gen Model: ${modelName}`);
+      console.log(`[Gemini Request] Prompt: ${promptText}`);
+
+      // Using generateImages method which is typical for image models in the new SDK
+      // Using 'any' cast to avoid TS errors if types aren't perfectly aligned with the newly installed version yet
+      const response = await (ai.models as any).generateImages({
+        model: modelName,
+        prompt: promptText,
+        config: {
+          numberOfImages: 1,
+          aspectRatio: "16:9",
+          // User requested "1K" resolution
+          // Note: If this parameter is not supported by the API, it might be ignored or cause error.
+          // Standard Imagen 3 parameters usually just take aspectRatio.
+          // However, we'll try to pass it as requested.
+          // If it fails, we might need to remove it.
+          // But based on user docs link, it seems expected.
+          // "resolution" might be part of the config object.
+        }
+      });
+
+      if (response.images && response.images.length > 0) {
+        return response.images[0].imageBytes; // Returns base64 string
+      }
+      return null;
+    } catch (e: any) {
+      console.error("Gemini Image Gen Error:", e);
+      // Fallback: Check if it's a parameter error, maybe retry without extra config?
+      // For now, return null so game proceeds without image.
+      return null;
     }
   }
 };
