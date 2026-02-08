@@ -230,12 +230,6 @@ const App: React.FC = () => {
     
     setLoading(true);
 
-    // Validate Language Selection
-    if (!gameState.settings.storyLanguage) {
-        setErrorMsg(t('languageRequired', lang));
-        return;
-    }
-
     // Use current persisted settings + new API Key
     const lobbySettings: LobbySettings = { 
       ...gameState.settings, // Use current state settings (which were loaded from LS)
