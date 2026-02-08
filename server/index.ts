@@ -135,8 +135,6 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     lobbyService.handleDisconnect(user.id.toString(), socket.id);
   });
-    // Handle disconnect (optional: mark player as offline?)
-  });
 });
 
 httpServer.listen(CONFIG.PORT, () => {
