@@ -112,13 +112,13 @@ io.on('connection', (socket) => {
 
   socket.on('update_settings', ({ code, settings }: { code: string, settings: Partial<LobbySettings> }) => {
      if (lobbyService.isCaptain(code, user.id.toString())) {
-         lobbyService.updateSettings(code, settings);
+         lobbyService.updateSettings(code, user.id.toString(), settings);
      }
   });
 
   socket.on('start_game', ({ code }: { code: string }) => {
       if (lobbyService.isCaptain(code, user.id.toString())) {
-          lobbyService.startGame(code);
+          lobbyService.startGame(code, user.id.toString());
       }
   });
 
@@ -128,7 +128,7 @@ io.on('connection', (socket) => {
 
   socket.on('reset_game', ({ code }: { code: string }) => {
       if (lobbyService.isCaptain(code, user.id.toString())) {
-          lobbyService.resetGame(code);
+          lobbyService.resetGame(code, user.id.toString());
       }
   });
 

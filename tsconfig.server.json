@@ -15,5 +15,5 @@
     "allowImportingTsExtensions": false
   },
   "include": ["server/**/*", "types.ts", "constants.ts"],
-  "exclude": ["src/**/*", "node_modules"]
+  "exclude": ["src/**/*", "node_modules", "**/*.test.ts"]
 }
