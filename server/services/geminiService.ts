@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { CONFIG } from "../config";
 import { SYSTEM_INSTRUCTIONS } from "../prompts";
 import { GameMode, ScenarioType, Player, RoundResult, Language, AIModelLevel } from "../../types";
@@ -12,6 +12,32 @@ const getModelName = (level: AIModelLevel = 'balanced', type: 'FAST' | 'SMART'):
     return configLevel[type];
 };
 
+// Retry helper for 503/429 errors
+const retryWithBackoff = async <T>(
+    operation: () => Promise<T>,
+    retries: number = 3,
+    delay: number = 1000
+): Promise<T> => {
+    try {
+        return await operation();
+    } catch (error: any) {
+        // Check for 503 (Service Unavailable) or 429 (Too Many Requests)
+        const status = error.status || error.response?.status || error.code;
+        const isTransient =
+            status === 503 ||
+            status === 429 ||
+            status === 'UNAVAILABLE' ||
+            (error.message && error.message.includes('overloaded'));
+
+        if (retries > 0 && isTransient) {
+            console.warn(`[Gemini Retry] Error ${status}. Retrying in ${delay}ms... (${retries} attempts left)`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return retryWithBackoff(operation, retries - 1, delay * 2);
+        }
+        throw error;
+    }
+};
+
 export const GeminiService = {
   /**
    * Validates if the API Key is working by making a lightweight call.
@@ -21,25 +47,19 @@ export const GeminiService = {
 
     try {
         const ai = getClient(apiKey);
-        // Use Economy FAST model for validation to save cost
         const modelName = getModelName('economy', 'FAST');
 
-        // Minimal token count request
-        const response = await ai.models.generateContent({
+        const response = await retryWithBackoff(() => ai.models.generateContent({
             model: modelName,
             contents: "Ping",
             config: {
-                // thinkingConfig: { thinkingLevel: "low" }, // Optional for Flash 3
                 responseMimeType: "text/plain"
             }
-        });
+        }), 1, 1000);
 
         return !!response.text;
     } catch (e: any) {
         console.error(`API Key Validation Failed for model ${CONFIG.MODELS.FAST}:`, e.message || e);
-        if (e.response) {
-            console.error("Error Response:", JSON.stringify(e.response, null, 2));
-        }
         return false;
     }
   },
@@ -61,7 +81,6 @@ export const GeminiService = {
 
     const langInstruction = language === 'ru' ? "Output Language: RUSSIAN" : "Output Language: ENGLISH";
 
-    // Pick specific instruction or random
     const scenarioTypes = SYSTEM_INSTRUCTIONS.SCENARIO_TYPES as Record<string, string>;
     let typeInstruction = scenarioTypes[type];
 
@@ -85,12 +104,12 @@ export const GeminiService = {
       console.log(`[Gemini Request] Model: ${modelName}, Task: SCENARIO_GENERATOR`);
       console.log(`[Gemini Request] Prompt Preview: ${prompt.substring(0, 200)}...`);
 
-      const response = await ai.models.generateContent({
+      const response = await retryWithBackoff(() => ai.models.generateContent({
         model: modelName,
         contents: prompt,
         config: {
         }
-      });
+      }));
 
       const text = response.text || "Error: No scenario generated.";
       console.log(`[Gemini Response] Output: ${text.substring(0, 200)}...`);
@@ -114,7 +133,7 @@ export const GeminiService = {
       console.log(`[Gemini Request] Model: ${modelName}, Task: CHEAT_DETECTOR`);
       console.log(`[Gemini Request] Action: "${actionText}"`);
 
-      const response = await ai.models.generateContent({
+      const response = await retryWithBackoff(() => ai.models.generateContent({
         model: modelName,
         contents: `
           ${SYSTEM_INSTRUCTIONS.CHEAT_DETECTOR}
@@ -131,7 +150,7 @@ export const GeminiService = {
             required: ["isCheat"]
           }
         }
-      });
+      }));
 
       const text = response.text;
       console.log(`[Gemini Response] Output: ${text}`);
@@ -188,7 +207,7 @@ export const GeminiService = {
       console.log(`[Gemini Request] Scenario: ${scenario.substring(0, 50)}...`);
       console.log(`[Gemini Request] Players Count: ${players.length}`);
 
-      const response = await ai.models.generateContent({
+      const response = await retryWithBackoff(() => ai.models.generateContent({
         model: modelName,
         contents: prompt,
         config: {
@@ -215,7 +234,7 @@ export const GeminiService = {
             required: ["story", "survivors", "deaths"]
           }
         }
-      });
+      }));
 
       const text = response.text;
       console.log(`[Gemini Response] Output: ${text}`);
@@ -241,39 +260,39 @@ export const GeminiService = {
   generateImage: async (apiKey: string, promptText: string): Promise<string | null> => {
     if (!apiKey) return null;
     const ai = getClient(apiKey);
-    // Use the specific model requested by user
     const modelName = 'gemini-3-pro-image-preview';
 
     try {
       console.log(`[Gemini Request] Image Gen Model: ${modelName}`);
       console.log(`[Gemini Request] Prompt: ${promptText}`);
 
-      // Using generateImages method which is typical for image models in the new SDK
-      // Using 'any' cast to avoid TS errors if types aren't perfectly aligned with the newly installed version yet
-      const response = await (ai.models as any).generateImages({
+      const response = await retryWithBackoff(() => ai.models.generateContent({
         model: modelName,
-        prompt: promptText,
+        contents: [
+            {
+                role: 'user',
+                parts: [{ text: promptText }]
+            }
+        ],
         config: {
-          numberOfImages: 1,
-          aspectRatio: "16:9",
-          // User requested "1K" resolution
-          // Note: If this parameter is not supported by the API, it might be ignored or cause error.
-          // Standard Imagen 3 parameters usually just take aspectRatio.
-          // However, we'll try to pass it as requested.
-          // If it fails, we might need to remove it.
-          // But based on user docs link, it seems expected.
-          // "resolution" might be part of the config object.
+          responseModalities: [Modality.IMAGE],
         }
-      });
+      }));
 
-      if (response.images && response.images.length > 0) {
-        return response.images[0].imageBytes; // Returns base64 string
+      // Extract image from response
+      const candidate = response.candidates?.[0];
+      if (candidate?.content?.parts?.length) {
+          for (const part of candidate.content.parts) {
+              if (part.inlineData && part.inlineData.data) {
+                  return part.inlineData.data; // Base64 string
+              }
+          }
       }
+
+      console.warn("Gemini Image Gen: No image data found in response.");
       return null;
     } catch (e: any) {
       console.error("Gemini Image Gen Error:", e);
-      // Fallback: Check if it's a parameter error, maybe retry without extra config?
-      // For now, return null so game proceeds without image.
       return null;
     }
   }
