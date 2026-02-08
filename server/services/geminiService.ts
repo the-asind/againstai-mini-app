@@ -260,7 +260,7 @@ export const GeminiService = {
   generateImage: async (apiKey: string, promptText: string): Promise<string | null> => {
     if (!apiKey) return null;
     const ai = getClient(apiKey);
-    const modelName = 'gemini-3-pro-image-preview';
+    const modelName = 'gemini-2.5-flash-image';
 
     try {
       console.log(`[Gemini Request] Image Gen Model: ${modelName}`);
