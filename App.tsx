@@ -133,7 +133,8 @@ const App: React.FC = () => {
       id: userId,
       name: storedNick,
       isCaptain: false,
-      status: 'waiting'
+      status: 'waiting',
+      isOnline: true
     });
 
     // If no local override, use TG language
@@ -160,7 +161,8 @@ const App: React.FC = () => {
         id: userId, 
         name: storedNick, 
         isCaptain: false, 
-        status: 'waiting' as const 
+        status: 'waiting' as const,
+        isOnline: true
       };
       // We need to wait for user to be set/connection to be established?
       // Actually we can just call join. SocketService handles connection.
@@ -678,9 +680,10 @@ const App: React.FC = () => {
               <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">Players</h3>
               <div className="flex-grow space-y-2 overflow-y-auto">
                   {gameState.players.map(p => (
-                      <div key={p.id} className="flex items-center p-3 bg-tg-secondaryBg rounded-lg">
+                      <div key={p.id} className={`flex items-center p-3 bg-tg-secondaryBg rounded-lg ${!p.isOnline ? 'opacity-50' : ''}`}>
                           <div className={`w-3 h-3 rounded-full mr-3 ${p.status === 'ready' ? 'bg-green-500' : 'bg-gray-500'}`} />
                           <span className="font-medium">{p.name}</span>
+                          {!p.isOnline && <span className="ml-2 text-xs text-red-500 font-bold">[OFFLINE]</span>}
                           {p.isCaptain && <span className="ml-auto text-xs text-yellow-500">👑 Captain</span>}
                       </div>
                   ))}

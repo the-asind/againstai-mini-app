@@ -34,6 +34,7 @@ export interface Player {
   avatarUrl?: string;
   status: 'alive' | 'dead' | 'waiting' | 'ready';
   actionText?: string;
+  isOnline: boolean;
 }
 
 export type AIModelLevel = 'economy' | 'balanced' | 'premium';
