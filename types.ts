@@ -1,5 +1,3 @@
-
-
 export type Language = 'en' | 'ru';
 
 export enum GameMode {
@@ -27,6 +25,12 @@ export enum GameStatus {
   RESULTS = 'RESULTS'
 }
 
+export enum ImageGenerationMode {
+  NONE = 'none',
+  SCENARIO = 'scenario',
+  FULL = 'full'
+}
+
 export interface Player {
   id: string;
   name: string;
@@ -47,6 +51,7 @@ export interface LobbySettings {
   apiKey: string; // Stored in session, not DB
   storyLanguage: Language | null; // The language the AI generates the story in. Null = not selected.
   aiModelLevel: AIModelLevel;
+  imageGenerationMode: ImageGenerationMode;
 }
 
 export interface GameState {
@@ -63,6 +68,7 @@ export interface RoundResult {
   story: string;
   survivors: string[]; // IDs of survivors
   deaths: { playerId: string; reason: string }[];
+  image?: string; // Optional generated image for results
 }
 
 // Telegram WebApp Types (Partial)

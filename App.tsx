@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel } from './types';
+import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel, ImageGenerationMode } from './types';
 import { translations, t } from './i18n';
 import { DEFAULT_SETTINGS, MIN_TIME, MAX_TIME, MIN_CHARS, MAX_CHARS } from './constants';
 import { SocketService } from './services/socketService';
@@ -62,7 +61,6 @@ const App: React.FC = () => {
   const [actionInput, setActionInput] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
-  // Removed local result state, using gameState.roundResult
   
   // Toast State
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
@@ -588,6 +586,35 @@ const App: React.FC = () => {
                       </div>
                   </div>
 
+                  {/* Image Generation Mode */}
+                  <div>
+                      <div className="flex justify-between text-sm mb-2">
+                          <span>{t('imageGenerationMode', lang)}</span>
+                      </div>
+                      <div className="flex bg-tg-bg p-1 rounded-lg">
+                          {(Object.values(ImageGenerationMode) as ImageGenerationMode[]).map((mode) => (
+                             <button
+                                key={mode}
+                                onClick={() => handleUpdateSettings('imageGenerationMode', mode)}
+                                disabled={!user?.isCaptain}
+                                className={`flex-1 py-2 text-[10px] font-bold uppercase rounded-lg transition-all flex flex-col items-center justify-center gap-1
+                                    ${gameState.settings.imageGenerationMode === mode
+                                        ? 'bg-tg-button text-white'
+                                        : 'text-tg-hint opacity-70 hover:bg-tg-bg/80'
+                                    }
+                                    ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
+                                `}
+                             >
+                                 <span>
+                                     {mode === ImageGenerationMode.NONE && t('imgNone', lang)}
+                                     {mode === ImageGenerationMode.SCENARIO && t('imgScenario', lang)}
+                                     {mode === ImageGenerationMode.FULL && t('imgFull', lang)}
+                                 </span>
+                             </button>
+                          ))}
+                      </div>
+                  </div>
+
                   {/* Time Limit */}
                   <div>
                       <div className="flex justify-between text-sm mb-1">
@@ -724,6 +751,11 @@ const App: React.FC = () => {
               </div>
 
               <div className="bg-gradient-to-b from-gray-900 to-gray-800 p-5 rounded-2xl border border-gray-700 shadow-xl mb-6">
+                  {gameState.scenarioImage && (
+                      <div className="mb-4 rounded-xl overflow-hidden shadow-lg border border-gray-600">
+                          <img src={gameState.scenarioImage} alt="Scenario" className="w-full h-auto object-cover" />
+                      </div>
+                  )}
                   <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">The Situation</h3>
                   <p className="leading-relaxed text-lg italic text-gray-100">
                       "{gameState.scenario}"
@@ -778,6 +810,12 @@ const App: React.FC = () => {
           <div className="min-h-screen flex flex-col p-4">
               <h2 className="text-3xl font-black mb-6 text-center">RESULTS</h2>
               
+              {gameState.roundResult?.image && (
+                  <div className="mb-6 rounded-2xl overflow-hidden shadow-2xl border border-tg-hint/20">
+                      <img src={gameState.roundResult.image} alt="Result" className="w-full h-auto object-cover" />
+                  </div>
+              )}
+
               <div className="bg-tg-secondaryBg p-5 rounded-2xl mb-6 shadow-lg border border-tg-hint/10">
                   <p className="leading-relaxed whitespace-pre-wrap">{gameState.roundResult.story}</p>
               </div>
