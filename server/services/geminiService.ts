@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { CONFIG } from "../config";
 import { SYSTEM_INSTRUCTIONS } from "../prompts";
 import { GameMode, ScenarioType, Player, RoundResult, Language, AIModelLevel } from "../../types";
@@ -22,9 +22,7 @@ const retryWithBackoff = async <T>(
         return await operation();
     } catch (error: any) {
         // Check for 503 (Service Unavailable) or 429 (Too Many Requests)
-        // User logs showed: {"error":{"code":503,"message":"...","status":"UNAVAILABLE"}} and explicit `status: 503` property on error object.
         const status = error.status || error.response?.status || error.code;
-        // Check for 503, 429, or specific error codes/messages indicating overload
         const isTransient =
             status === 503 ||
             status === 429 ||
@@ -51,14 +49,13 @@ export const GeminiService = {
         const ai = getClient(apiKey);
         const modelName = getModelName('economy', 'FAST');
 
-        // We wrap even validation in retry, though maybe less critical.
         const response = await retryWithBackoff(() => ai.models.generateContent({
             model: modelName,
             contents: "Ping",
             config: {
                 responseMimeType: "text/plain"
             }
-        }), 1, 1000); // 1 retry for validation
+        }), 1, 1000);
 
         return !!response.text;
     } catch (e: any) {
@@ -278,9 +275,8 @@ export const GeminiService = {
             }
         ],
         config: {
-          responseModalities: ["IMAGE"],
-          // We assume standard JS SDK configuration structure based on Python SDK 'image_config'
-        } as any
+          responseModalities: [Modality.IMAGE],
+        }
       }));
 
       // Extract image from response

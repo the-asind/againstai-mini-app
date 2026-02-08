@@ -3,7 +3,7 @@ import { test, describe, expect, mock } from 'bun:test';
 // Mock external dependencies to prevent import errors
 mock.module("@google/genai", () => ({
     GoogleGenAI: class {},
-    Type: {}
+    Type: {}, Modality: { IMAGE: "IMAGE" }
 }));
 
 // Mock local dependencies that import external ones
