@@ -36,17 +36,21 @@ export const MarkdownDisplay: React.FC<MarkdownDisplayProps> = ({ content, class
           ),
 
           // Code
-          code: ({node, ...props}) => {
-            // Check if it's inline code or block code
-            const isInline = !props.className?.includes('language-');
-             return (
-              <code
-                className={`font-mono text-sm bg-tg-secondaryBg px-1.5 py-0.5 rounded text-tg-link border border-tg-hint/20 ${isInline ? 'inline-block align-middle' : 'block p-3 overflow-x-auto my-3'}`}
-                {...props}
-              />
+          code: ({node, className, children, ...props}) => {
+            const match = /language-(\w+)/.exec(className || '');
+            const isBlock = !!match || (String(children).includes('\n'));
+
+            return !isBlock ? (
+              <code className={`font-mono text-sm bg-tg-secondaryBg px-1.5 py-0.5 rounded text-tg-link border border-tg-hint/20 inline-block align-middle ${className || ''}`} {...props}>
+                {children}
+              </code>
+            ) : (
+              <code className={`font-mono text-sm block p-3 overflow-x-auto my-3 bg-tg-secondaryBg rounded-lg border border-tg-hint/20 text-tg-link whitespace-pre ${className || ''}`} {...props}>
+                {children}
+              </code>
             );
           },
-          pre: ({node, ...props}) => <pre className="overflow-x-auto my-4 rounded-lg" {...props} />,
+          pre: ({node, ...props}) => <div className="overflow-x-auto my-4 rounded-lg" {...props} />,
 
           // Links
           a: ({node, ...props}) => <a className="text-tg-link underline hover:opacity-80 transition-opacity font-medium break-all" target="_blank" rel="noopener noreferrer" {...props} />,
