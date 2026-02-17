@@ -118,6 +118,7 @@ export class LobbyService {
         lobby.settings.apiKey,
         lobby.settings.mode,
         lobby.settings.scenarioType,
+        lobby.players,
         lang,
         lobby.settings.aiModelLevel
       );

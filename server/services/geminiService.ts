@@ -1,7 +1,10 @@
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { CONFIG } from "../config";
 import { SYSTEM_INSTRUCTIONS } from "../prompts";
-import { GameMode, ScenarioType, Player, RoundResult, Language, AIModelLevel } from "../../types";
+import { GameMode, ScenarioType, Player, RoundResult, Language, AIModelLevel, ScenarioResponse } from "../../types";
+import { ABSTRACT_ROLES } from "../archetypes/roles";
+import { ABSTRACT_INCIDENTS } from "../archetypes/incidents";
+import { ABSTRACT_TWISTS } from "../archetypes/twists";
 
 // We rely on the global fetch patch (initialized in server/index.ts) to handle proxying
 const getClient = (apiKey: string) => new GoogleGenAI({ apiKey: apiKey.trim() });
@@ -71,6 +74,7 @@ export const GeminiService = {
     apiKey: string,
     mode: GameMode,
     type: ScenarioType,
+    players: Player[],
     language: Language = 'en',
     aiLevel: AIModelLevel = 'balanced'
   ): Promise<string> => {
@@ -79,7 +83,15 @@ export const GeminiService = {
     const ai = getClient(apiKey);
     const modelName = getModelName(aiLevel, 'SMART');
 
-    const langInstruction = language === 'ru' ? "Output Language: RUSSIAN" : "Output Language: ENGLISH";
+    // Randomizer Logic
+    const role = ABSTRACT_ROLES[Math.floor(Math.random() * ABSTRACT_ROLES.length)];
+    const incident = ABSTRACT_INCIDENTS[Math.floor(Math.random() * ABSTRACT_INCIDENTS.length)];
+    const useTwist = Math.random() > 0.8; // 20% chance
+    const twist = useTwist ? ABSTRACT_TWISTS[Math.floor(Math.random() * ABSTRACT_TWISTS.length)] : "NONE";
+
+    // Prepare variables
+    const playerCount = players.length;
+    const playersList = players.map(p => p.name).join(", ");
 
     const scenarioTypes = SYSTEM_INSTRUCTIONS.SCENARIO_TYPES as Record<string, string>;
     let typeInstruction = scenarioTypes[type];
@@ -90,15 +102,14 @@ export const GeminiService = {
         typeInstruction = scenarioTypes[randomKey];
     }
 
-    const prompt = `
-      ${SYSTEM_INSTRUCTIONS.SCENARIO_GENERATOR}
-
-      SETTINGS:
-      Game Mode: ${mode}
-      Theme: ${typeInstruction}
-
-      ${langInstruction}
-    `;
+    const prompt = SYSTEM_INSTRUCTIONS.SCENARIO_GENERATOR
+        .replace('{{PLAYER_COUNT}}', playerCount.toString())
+        .replace('{{PLAYERS}}', playersList)
+        .replace('{{LANGUAGE}}', language === 'ru' ? 'Russian' : 'English')
+        .replace('{{THEME}}', typeInstruction)
+        .replace('{{ROLE}}', role)
+        .replace('{{INCIDENT}}', incident)
+        .replace('{{TWIST}}', twist);
 
     try {
       console.log(`[Gemini Request] Model: ${modelName}, Task: SCENARIO_GENERATOR`);
@@ -108,12 +119,39 @@ export const GeminiService = {
         model: modelName,
         contents: prompt,
         config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    gm_notes: {
+                        type: Type.OBJECT,
+                        properties: {
+                            analysis: { type: Type.STRING },
+                            hidden_threat_logic: { type: Type.STRING },
+                            solution_clues: { type: Type.STRING },
+                            sanity_check: { type: Type.STRING }
+                        }
+                    },
+                    scenario_text: { type: Type.STRING }
+                },
+                required: ["scenario_text"]
+            }
         }
       }));
 
-      const text = response.text || "Error: No scenario generated.";
+      const text = response.text;
+      if (!text) throw new Error("Empty response from AI");
+
       console.log(`[Gemini Response] Output: ${text.substring(0, 200)}...`);
-      return text;
+
+      try {
+          const jsonResponse = JSON.parse(text) as ScenarioResponse;
+          return jsonResponse.scenario_text;
+      } catch (parseError) {
+          console.warn("Gemini returned non-JSON text, falling back to raw text.");
+          return text;
+      }
+
     } catch (error) {
       console.error("Gemini Generate Scenario Error:", error);
       throw error;
