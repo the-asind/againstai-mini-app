@@ -12,7 +12,11 @@ export enum ScenarioType {
   SUPERNATURAL = 'supernatural',
   APOCALYPSE = 'apocalypse',
   FANTASY = 'fantasy',
-  CYBERPUNK = 'cyberpunk'
+  CYBERPUNK = 'cyberpunk',
+  BACKROOMS = 'backrooms',
+  SCP = 'scp',
+  MINECRAFT = 'minecraft',
+  HARRY_POTTER = 'harry_potter'
 }
 
 export enum GameStatus {

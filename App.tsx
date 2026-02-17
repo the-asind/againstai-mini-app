@@ -576,6 +576,10 @@ const App: React.FC = () => {
                                  {type === ScenarioType.APOCALYPSE && t('apocalypse', lang)}
                                  {type === ScenarioType.FANTASY && t('fantasy', lang)}
                                  {type === ScenarioType.CYBERPUNK && t('cyberpunk', lang)}
+                                 {type === ScenarioType.BACKROOMS && t('backrooms', lang)}
+                                 {type === ScenarioType.SCP && t('scp', lang)}
+                                 {type === ScenarioType.MINECRAFT && t('minecraft', lang)}
+                                 {type === ScenarioType.HARRY_POTTER && t('harryPotter', lang)}
                              </button>
                           ))}
                       </div>
