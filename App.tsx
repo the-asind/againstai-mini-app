@@ -6,6 +6,7 @@ import { SocketService } from './services/socketService';
 import { Button } from './components/Button';
 import { Input } from './components/Input';
 import { CodeInput } from './components/CodeInput';
+import { MarkdownDisplay } from './components/MarkdownDisplay';
 
 // Storage Keys
 const STORAGE_KEYS = {
@@ -751,9 +752,7 @@ const App: React.FC = () => {
                       </div>
                   )}
                   <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">The Situation</h3>
-                  <p className="leading-relaxed text-lg italic text-gray-100">
-                      "{gameState.scenario}"
-                  </p>
+                  <MarkdownDisplay content={gameState.scenario || ''} />
               </div>
 
               <div className="flex-grow flex flex-col space-y-2">
@@ -811,7 +810,7 @@ const App: React.FC = () => {
               )}
 
               <div className="bg-tg-secondaryBg p-5 rounded-2xl mb-6 shadow-lg border border-tg-hint/10">
-                  <p className="leading-relaxed whitespace-pre-wrap">{gameState.roundResult.story}</p>
+                  <MarkdownDisplay content={gameState.roundResult.story} />
               </div>
 
               <div className="space-y-3 mb-8">
