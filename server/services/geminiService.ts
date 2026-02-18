@@ -134,7 +134,7 @@ export const GeminiService = {
                     },
                     scenario_text: { type: Type.STRING }
                 },
-                required: ["scenario_text"]
+                required: ["scenario_text", "gm_notes"]
             }
         }
       }));

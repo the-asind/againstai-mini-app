@@ -756,7 +756,7 @@ const App: React.FC = () => {
                       </div>
                   )}
                   <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">The Situation</h3>
-                  <MarkdownDisplay content={gameState.scenario?.scenario_text || ''} />
+                  <MarkdownDisplay content={gameState.scenario || ''} />
               </div>
 
               <div className="flex-grow flex flex-col space-y-2">
