@@ -1,5 +1,5 @@
 import { Server as SocketIOServer } from 'socket.io';
-import { GameState, GameStatus, LobbySettings, Player, RoundResult, GameMode, ScenarioType, ImageGenerationMode } from '../../types';
+import { GameState, ServerGameState, GameStatus, LobbySettings, Player, RoundResult, GameMode, ScenarioType, ImageGenerationMode } from '../../types';
 import { GeminiService } from './geminiService';
 import { CONFIG } from '../config';
 import { saveImage } from '../utils/imageStorage';
@@ -8,7 +8,7 @@ const LOBBY_CODE_LENGTH = 6;
 const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
 export class LobbyService {
-  private lobbies: Map<string, GameState> = new Map();
+  private lobbies: Map<string, ServerGameState> = new Map();
   private timers: Map<string, NodeJS.Timeout> = new Map();
   private playerSockets: Map<string, Set<string>> = new Map();
   private io: SocketIOServer;
@@ -35,7 +35,7 @@ export class LobbyService {
 
   public createLobby(host: Player, settings: LobbySettings, socketId: string): string {
     const code = this.generateCode();
-    const initialState: GameState = {
+    const initialState: ServerGameState = {
       lobbyCode: code,
       players: [{ ...host, isCaptain: true, status: 'waiting', isOnline: true }],
       status: GameStatus.LOBBY_WAITING,
@@ -128,7 +128,7 @@ export class LobbyService {
       // Image Generation (SCENARIO)
       if (lobby.settings.imageGenerationMode !== ImageGenerationMode.NONE) {
           try {
-             const prompt = `Create a 16:9 cinematic realistic image visualizing this scene: ${scenario}`;
+             const prompt = `Create a 16:9 cinematic realistic image visualizing this scene: ${scenario.scenario_text}`;
              const base64 = await GeminiService.generateImage(lobby.settings.apiKey, prompt);
              if (base64) {
                  const url = await saveImage(base64);
@@ -219,9 +219,20 @@ export class LobbyService {
 
      try {
          const lang = lobby.settings.storyLanguage || 'en';
+
+         const safeScenario = lobby.scenario || {
+             scenario_text: "Unknown Scenario",
+             gm_notes: {
+                 analysis: "",
+                 hidden_threat_logic: "",
+                 solution_clues: "",
+                 sanity_check: ""
+             }
+         };
+
          const result = await GeminiService.judgeRound(
              lobby.settings.apiKey,
-             lobby.scenario || "Unknown Scenario",
+             safeScenario,
              lobby.players,
              lobby.settings.mode,
              lang,
@@ -284,7 +295,12 @@ export class LobbyService {
   public emitUpdate(code: string) {
     const lobby = this.lobbies.get(code);
     if (lobby) {
-        this.io.to(code).emit('game_state', lobby);
+        // Create a safe copy of the state for clients
+        const clientState: GameState = {
+            ...lobby,
+            scenario: lobby.scenario ? lobby.scenario.scenario_text : null
+        };
+        this.io.to(code).emit('game_state', clientState);
     }
   }
 }

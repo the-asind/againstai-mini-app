@@ -58,13 +58,25 @@ export interface LobbySettings {
   imageGenerationMode: ImageGenerationMode;
 }
 
+// Internal Server State (Has secrets)
+export interface ServerGameState {
+  lobbyCode: string | null;
+  players: Player[];
+  status: GameStatus;
+  settings: LobbySettings;
+  scenario: ScenarioResponse | null; // Full object with secrets
+  scenarioImage?: string;
+  roundResult?: RoundResult;
+}
+
+// Client-Side State (Safe)
 export interface GameState {
   lobbyCode: string | null;
   players: Player[];
   status: GameStatus;
   settings: LobbySettings;
-  scenario: string | null;
-  scenarioImage?: string; // Optional generated image
+  scenario: string | null; // Just the text!
+  scenarioImage?: string;
   roundResult?: RoundResult;
 }
 
