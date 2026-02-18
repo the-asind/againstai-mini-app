@@ -128,7 +128,8 @@ export class LobbyService {
       // Image Generation (SCENARIO)
       if (lobby.settings.imageGenerationMode !== ImageGenerationMode.NONE) {
           try {
-             const prompt = `Create a 16:9 cinematic realistic image visualizing this scene: ${scenario}`;
+             // Use scenario.scenario_text for image generation
+             const prompt = `Create a 16:9 cinematic realistic image visualizing this scene: ${scenario.scenario_text}`;
              const base64 = await GeminiService.generateImage(lobby.settings.apiKey, prompt);
              if (base64) {
                  const url = await saveImage(base64);
@@ -219,9 +220,21 @@ export class LobbyService {
 
      try {
          const lang = lobby.settings.storyLanguage || 'en';
+
+         // Handle potential missing scenario (though unlikely)
+         const safeScenario = lobby.scenario || {
+             scenario_text: "Unknown Scenario",
+             gm_notes: {
+                 analysis: "",
+                 hidden_threat_logic: "",
+                 solution_clues: "",
+                 sanity_check: ""
+             }
+         };
+
          const result = await GeminiService.judgeRound(
              lobby.settings.apiKey,
-             lobby.scenario || "Unknown Scenario",
+             safeScenario,
              lobby.players,
              lobby.settings.mode,
              lang,

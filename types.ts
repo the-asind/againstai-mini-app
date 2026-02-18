@@ -63,7 +63,7 @@ export interface GameState {
   players: Player[];
   status: GameStatus;
   settings: LobbySettings;
-  scenario: string | null;
+  scenario: ScenarioResponse | null;
   scenarioImage?: string; // Optional generated image
   roundResult?: RoundResult;
 }

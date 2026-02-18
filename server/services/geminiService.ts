@@ -77,7 +77,7 @@ export const GeminiService = {
     players: Player[],
     language: Language = 'en',
     aiLevel: AIModelLevel = 'balanced'
-  ): Promise<string> => {
+  ): Promise<ScenarioResponse> => {
     if (!apiKey) throw new Error("API Key required");
 
     const ai = getClient(apiKey);
@@ -146,10 +146,18 @@ export const GeminiService = {
 
       try {
           const jsonResponse = JSON.parse(text) as ScenarioResponse;
-          return jsonResponse.scenario_text;
+          return jsonResponse;
       } catch (parseError) {
-          console.warn("Gemini returned non-JSON text, falling back to raw text.");
-          return text;
+          console.warn("Gemini returned non-JSON text, falling back to raw text wrap.");
+          return {
+              scenario_text: text,
+              gm_notes: {
+                  analysis: "Failed to parse JSON",
+                  hidden_threat_logic: "Unknown",
+                  solution_clues: "Unknown",
+                  sanity_check: "Unknown"
+              }
+          };
       }
 
     } catch (error) {
@@ -206,7 +214,7 @@ export const GeminiService = {
    */
   judgeRound: async (
     apiKey: string,
-    scenario: string,
+    scenario: ScenarioResponse,
     players: Player[],
     mode: GameMode,
     language: Language = 'en',
@@ -228,21 +236,23 @@ export const GeminiService = {
       action: p.actionText || "No action taken."
     }));
 
-    const prompt = `
-      ${SYSTEM_INSTRUCTIONS.JUDGE_BASE}
+    // Replace placeholders in JUDGE_BASE
+    let prompt = SYSTEM_INSTRUCTIONS.JUDGE_BASE
+        .replace('{{SCENARIO_TEXT}}', JSON.stringify(scenario, null, 2))
+        .replace('{{PLAYER_ACTIONS_JSON}}', JSON.stringify(inputs, null, 2))
+        .replace('{{GAME_MODE}}', modeInstruction);
 
+    // Prepend language instruction
+    prompt = `
       CONTEXT:
       ${langInstruction}
-      Scenario: ${scenario}
-      Game Mode: ${modeInstruction}
 
-      PLAYER ACTIONS:
-      ${JSON.stringify(inputs, null, 2)}
+      ${prompt}
     `;
 
     try {
       console.log(`[Gemini Request] Model: ${modelName}, Task: JUDGE_BASE`);
-      console.log(`[Gemini Request] Scenario: ${scenario.substring(0, 50)}...`);
+      console.log(`[Gemini Request] Scenario Preview: ${scenario.scenario_text.substring(0, 50)}...`);
       console.log(`[Gemini Request] Players Count: ${players.length}`);
 
       const response = await retryWithBackoff(() => ai.models.generateContent({

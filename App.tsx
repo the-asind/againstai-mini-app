@@ -756,7 +756,7 @@ const App: React.FC = () => {
                       </div>
                   )}
                   <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">The Situation</h3>
-                  <MarkdownDisplay content={gameState.scenario || ''} />
+                  <MarkdownDisplay content={gameState.scenario?.scenario_text || ''} />
               </div>
 
               <div className="flex-grow flex flex-col space-y-2">
@@ -820,12 +820,12 @@ const App: React.FC = () => {
               <div className="space-y-3 mb-8">
                   <h3 className="text-sm font-bold text-tg-hint uppercase">Status Report</h3>
                   {gameState.players.map(p => {
-                      const isDead = gameState.roundResult!.deaths.find(d => d.playerId === p.id);
+                      const deathInfo = gameState.roundResult!.deaths.find(d => d.playerId === p.id);
                       return (
-                          <div key={p.id} className={`flex items-center justify-between p-3 rounded-lg border ${isDead ? 'border-red-900 bg-red-900/10' : 'border-green-900 bg-green-900/10'}`}>
+                          <div key={p.id} className={`flex items-center justify-between p-3 rounded-lg border ${deathInfo ? 'border-red-900 bg-red-900/10' : 'border-green-900 bg-green-900/10'}`}>
                               <span className="font-bold">{p.name}</span>
-                              <span className={`text-xs font-bold px-2 py-1 rounded ${isDead ? 'bg-red-600 text-white' : 'bg-green-600 text-white'}`}>
-                                  {isDead ? t('died', lang) : t('survived', lang)}
+                              <span className={`text-xs font-bold px-2 py-1 rounded ${deathInfo ? 'bg-red-600 text-white' : 'bg-green-600 text-white'}`}>
+                                  {deathInfo ? (deathInfo.reason || t('died', lang)) : t('survived', lang)}
                               </span>
                           </div>
                       );

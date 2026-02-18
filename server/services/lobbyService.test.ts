@@ -1,4 +1,5 @@
 import { test, describe, expect, mock } from 'bun:test';
+import { Player, GameMode, ScenarioType, GameStatus } from '../../types';
 
 // Mock external dependencies to prevent import errors
 mock.module("@google/genai", () => ({
@@ -9,10 +10,19 @@ mock.module("@google/genai", () => ({
 // Mock local dependencies that import external ones
 mock.module("./geminiService", () => ({
   GeminiService: {
-    generateScenario: () => Promise.resolve("Mock Scenario"),
+    generateScenario: () => Promise.resolve({
+        scenario_text: "Mock Scenario",
+        gm_notes: {
+            analysis: "Mock Analysis",
+            hidden_threat_logic: "Mock Threat",
+            solution_clues: "Mock Clue",
+            sanity_check: "Mock Sanity"
+        }
+    }),
     judgeRound: () => Promise.resolve({ story: "Mock Story", survivors: [], deaths: [] }),
     checkInjection: () => Promise.resolve({ isCheat: false }),
-    validateKey: () => Promise.resolve(true)
+    validateKey: () => Promise.resolve(true),
+    generateImage: () => Promise.resolve(null)
   }
 }));
 
@@ -24,7 +34,6 @@ mock.module("socket.io", () => ({
 
 // Now import the service
 import { LobbyService } from './lobbyService';
-import { Player, GameMode, ScenarioType, GameStatus } from '../../types';
 
 describe('LobbyService', () => {
   const mockIO = {
@@ -48,7 +57,8 @@ describe('LobbyService', () => {
     scenarioType: ScenarioType.SCI_FI,
     apiKey: 'sk-test-123',
     storyLanguage: 'en' as const,
-    aiModelLevel: 'premium' as const
+    aiModelLevel: 'premium' as const,
+    imageGenerationMode: 'none' as any
   });
 
   const mockSocketId = 'socket-123';
