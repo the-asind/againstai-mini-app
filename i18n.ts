@@ -1,4 +1,3 @@
-
 import { Language } from "./types";
 
 export const translations = {
@@ -71,7 +70,25 @@ export const translations = {
     imgFull: "Full Experience",
     imgNoneDesc: "Text only",
     imgScenarioDesc: "Visualize the situation",
-    imgFullDesc: "Visualize situation & results",
+    imgFullDesc: "Scenario & Results",
+    or: "OR",
+    gameSettings: "Game Settings",
+    codeLabel: "Code:",
+    players: "Players",
+    timeLeft: "Time Left",
+    situation: "The Situation",
+    results: "RESULTS",
+    statusReport: "Status Report",
+    actionSubmitted: "Action Submitted",
+    submit: "Submit",
+    geminiThinking: "Gemini 3 Pro is thinking...",
+    analyzing: "Analyzing survival probabilities...",
+    loading: "Loading...",
+    missingApiKey: "⚠️ MISSING API KEY",
+    missingApiKeyDesc: "You must set a Google Gemini API Key in settings (⚙️) to start.",
+    cancel: "Cancel",
+    save: "Save",
+    settingsTitle: "Settings"
   },
   ru: {
     createLobby: "Создать лобби",
@@ -143,6 +160,24 @@ export const translations = {
     imgNoneDesc: "Только текст",
     imgScenarioDesc: "Картинка ситуации",
     imgFullDesc: "Сценарий и Итоги",
+    or: "ИЛИ",
+    gameSettings: "Настройки игры",
+    codeLabel: "Код:",
+    players: "Игроки",
+    timeLeft: "Осталось времени",
+    situation: "Ситуация",
+    results: "РЕЗУЛЬТАТЫ",
+    statusReport: "Отчет о статусе",
+    actionSubmitted: "Действие отправлено",
+    submit: "Отправить",
+    geminiThinking: "Gemini 3 Pro думает...",
+    analyzing: "Анализ вероятности выживания...",
+    loading: "Загрузка...",
+    missingApiKey: "⚠️ НЕТ API КЛЮЧА",
+    missingApiKeyDesc: "Вы должны установить ключ Google Gemini API в настройках (⚙️), чтобы начать.",
+    cancel: "Отмена",
+    save: "Сохранить",
+    settingsTitle: "Настройки"
   }
 };
 

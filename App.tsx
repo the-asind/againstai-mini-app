@@ -16,12 +16,26 @@ const STORAGE_KEYS = {
     LANG: 'against_ai_ui_lang'
 };
 
+// Extracted Components
+const Toast = ({ toast }: { toast: { msg: string, type: 'success' | 'error' } | null }) => (
+    <div className={`fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-full shadow-2xl z-50 transition-all duration-300 ${toast ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5 pointer-events-none'}
+      ${toast?.type === 'error' ? 'bg-red-600' : 'bg-green-600'} text-white font-bold flex items-center gap-2`}>
+       {toast?.type === 'success' && (
+           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+             <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+           </svg>
+       )}
+       {toast?.msg}
+    </div>
+);
+
 const App: React.FC = () => {
   // -- Initialization & State --
   
-  // 1. Load Language
-  const savedLang = localStorage.getItem(STORAGE_KEYS.LANG) as Language | null;
-  const [lang, setLangState] = useState<'en' | 'ru'>(savedLang || 'en');
+  // 1. Load Language (Lazy Init)
+  const [lang, setLangState] = useState<'en' | 'ru'>(() =>
+      (localStorage.getItem(STORAGE_KEYS.LANG) as Language) || 'en'
+  );
 
   // Wrapper to save lang on change
   const setLang = (l: Language) => {
@@ -31,8 +45,8 @@ const App: React.FC = () => {
 
   const [user, setUser] = useState<Player | null>(null);
   
-  // 2. Load Settings (Merge with defaults to handle versioning)
-  const loadSavedSettings = (): LobbySettings => {
+  // 2. Load Settings (Lazy Init)
+  const [initialSettings] = useState<LobbySettings>(() => {
       try {
           const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
           if (saved) {
@@ -42,9 +56,7 @@ const App: React.FC = () => {
           console.error("Failed to parse settings", e);
       }
       return DEFAULT_SETTINGS;
-  };
-
-  const [initialSettings] = useState<LobbySettings>(loadSavedSettings());
+  });
 
   // Game State
   const [gameState, setGameState] = useState<GameState>({
@@ -72,6 +84,7 @@ const App: React.FC = () => {
   const timeLeftRef = useRef<number>(0);
   const [timeLeftDisplay, setTimeLeftDisplay] = useState(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const actionInputRef = useRef(''); // Ref for current input to avoid stale closures
 
   // Drag Scroll State
   const [isDragging, setIsDragging] = useState(false);
@@ -84,6 +97,12 @@ const App: React.FC = () => {
     if (tg.isVersionAtLeast && tg.isVersionAtLeast('6.1')) {
       tg.HapticFeedback.notificationOccurred(type);
     }
+  };
+
+  // Sync state to ref
+  const handleActionInputChange = (val: string) => {
+      setActionInput(val);
+      actionInputRef.current = val;
   };
 
   // -- Effects --
@@ -125,7 +144,6 @@ const App: React.FC = () => {
     
     // Load persisted inputs
     const storedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME) || tgFirstName;
-    const storedKey = localStorage.getItem(STORAGE_KEYS.API_KEY) || '';
 
     // Default User State
     const playerObj: Player = {
@@ -138,7 +156,7 @@ const App: React.FC = () => {
     setUser(playerObj);
 
     // If no local override, use TG language
-    if (!savedLang && initData.user?.language_code === 'ru') {
+    if (!localStorage.getItem(STORAGE_KEYS.LANG) && initData.user?.language_code === 'ru') {
         setLang('ru');
     }
 
@@ -150,6 +168,9 @@ const App: React.FC = () => {
         if (newState.status === GameStatus.PLAYER_INPUT && prevState.status !== GameStatus.PLAYER_INPUT) {
             timeLeftRef.current = newState.settings.timeLimitSeconds;
             setTimeLeftDisplay(newState.settings.timeLimitSeconds);
+            // Reset input on new round
+            setActionInput("");
+            actionInputRef.current = "";
         }
         return newState;
       });
@@ -162,8 +183,6 @@ const App: React.FC = () => {
 
     // Deep Linking Check (Delayed to ensure socket connection or handled in connect)
     if (initData.start_param) {
-      // We need to wait for user to be set/connection to be established?
-      // Actually we can just call join. SocketService handles connection.
       handleJoinLobby(initData.start_param, playerObj);
     }
 
@@ -205,14 +224,10 @@ const App: React.FC = () => {
     setErrorMsg('');
     if (!user) return;
 
+    setLoading(true);
+
     // Use stored key or empty
     const cleanKey = localStorage.getItem(STORAGE_KEYS.API_KEY) || '';
-    
-    // Update User Name locally (redundant if we don't change it, but good for safety)
-    const updatedUser = { ...user, isCaptain: true };
-    setUser(updatedUser);
-    
-    setLoading(true);
 
     // Use current persisted settings + new API Key
     const lobbySettings: LobbySettings = { 
@@ -220,15 +235,17 @@ const App: React.FC = () => {
       apiKey: cleanKey 
     };
 
-    setLoading(true);
-
     try {
         // Skip validation for instant creation
-        await SocketService.createLobby(updatedUser, lobbySettings);
+        const newUser = { ...user, isCaptain: true };
+        await SocketService.createLobby(newUser, lobbySettings);
+        // Only update user state on success
+        setUser(newUser);
     } catch (e: any) {
         setErrorMsg(e.toString());
+    } finally {
+        setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleJoinLobby = async (code: string, playerObj = user) => {
@@ -236,18 +253,24 @@ const App: React.FC = () => {
     
     // Ensure name is consistent
     const storedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME) || playerObj.name;
-    playerObj = { ...playerObj, name: storedNick };
-    setUser(playerObj);
+    const updatedPlayerObj = { ...playerObj, name: storedNick };
+    setUser(updatedPlayerObj);
 
     setErrorMsg('');
     setLoading(true);
     
-    const success = await SocketService.joinLobby(code, playerObj);
-    if (!success) {
-        setErrorMsg(t('lobbyNotFound', lang));
+    try {
+        const success = await SocketService.joinLobby(code, updatedPlayerObj);
+        if (!success) {
+            setErrorMsg(t('lobbyNotFound', lang));
+            triggerHaptic('error');
+        }
+    } catch (e) {
+        setErrorMsg(t('lobbyNotFound', lang)); // Generic error for now
         triggerHaptic('error');
+    } finally {
+        setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleUpdateSettings = (key: keyof LobbySettings, value: any) => {
@@ -300,7 +323,8 @@ const App: React.FC = () => {
            clearInterval(interval);
            // Auto-submit logic is handled by server timeout.
            // But we can submit partial text if we want to be safe.
-           if (actionInput.trim()) {
+           // Use Ref to avoid stale closure
+           if (actionInputRef.current.trim()) {
                handleSubmitAction(true);
            }
         }
@@ -313,7 +337,8 @@ const App: React.FC = () => {
   const handleSubmitAction = async (force = false) => {
     if (!user || !gameState.lobbyCode) return;
     
-    let currentInput = actionInput.trim();
+    // Use Ref for latest input
+    let currentInput = actionInputRef.current.trim();
 
     if (!currentInput && !force) return;
 
@@ -328,12 +353,16 @@ const App: React.FC = () => {
     
     // Server performs cheat detection now
     SocketService.submitAction(gameState.lobbyCode, currentInput);
+
+    // Optimistic Update
+    setUser(prev => prev ? ({ ...prev, status: 'ready' }) : null);
+
     setLoading(false);
   };
 
   const handleRestart = () => {
       if (!gameState.lobbyCode) return;
-      setActionInput("");
+      handleActionInputChange("");
       setErrorMsg("");
       SocketService.resetGame(gameState.lobbyCode);
   };
@@ -370,28 +399,16 @@ const App: React.FC = () => {
       }
 
       setShowSettingsModal(false);
-      setToast({ msg: "Settings Saved", type: 'success' });
+      setToast({ msg: t('save', lang), type: 'success' });
       triggerHaptic('success');
   };
 
   // -- Renders --
   
-  const Toast = () => (
-    <div className={`fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-full shadow-2xl z-50 transition-all duration-300 ${toast ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5 pointer-events-none'} 
-      ${toast?.type === 'error' ? 'bg-red-600' : 'bg-green-600'} text-white font-bold flex items-center gap-2`}>
-       {toast?.type === 'success' && (
-           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-             <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-           </svg>
-       )}
-       {toast?.msg}
-    </div>
-  );
-
   const SettingsModal = () => (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-tg-secondaryBg w-full max-w-sm rounded-2xl p-6 border border-tg-hint/20 shadow-2xl space-y-4">
-              <h3 className="text-xl font-bold text-center">Settings</h3>
+              <h3 className="text-xl font-bold text-center">{t('settingsTitle', lang)}</h3>
 
               <div className="space-y-2">
                   <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('nickname', lang)}</label>
@@ -413,17 +430,17 @@ const App: React.FC = () => {
                           autoComplete="off"
                        />
                        <p className="text-[10px] text-tg-hint">
-                          Required to start the game. Get it from <a href="https://aistudio.google.com/api-keys" target="_blank" className="underline text-tg-link">Google AI Studio</a>.
+                          {t('apiKeyHintPrefix', lang)} <a href="https://aistudio.google.com/api-keys" target="_blank" className="underline text-tg-link">{t('apiKeyLink', lang)}</a>.
                        </p>
                   </div>
               )}
 
               <div className="flex gap-3 pt-2">
                   <Button variant="secondary" onClick={() => setShowSettingsModal(false)}>
-                      Cancel
+                      {t('cancel', lang)}
                   </Button>
                   <Button onClick={saveSettings}>
-                      Save
+                      {t('save', lang)}
                   </Button>
               </div>
           </div>
@@ -433,7 +450,7 @@ const App: React.FC = () => {
   if (gameState.status === GameStatus.HOME) {
     return (
       <div className="min-h-screen p-6 flex flex-col items-center relative">
-        <Toast />
+        <Toast toast={toast} />
         {/* Lang Switch */}
         <div className="absolute top-4 right-4 flex gap-2 text-sm font-bold z-10">
             <button onClick={() => setLang('en')} className={lang === 'en' ? 'text-tg-button' : 'text-tg-hint'}>EN</button>
@@ -458,7 +475,7 @@ const App: React.FC = () => {
             {/* Divider */}
             <div className="relative flex py-2 items-center">
                 <div className="flex-grow border-t border-tg-hint/20"></div>
-                <span className="flex-shrink mx-4 text-tg-hint text-xs uppercase">OR</span>
+                <span className="flex-shrink mx-4 text-tg-hint text-xs uppercase">{t('or', lang)}</span>
                 <div className="flex-grow border-t border-tg-hint/20"></div>
             </div>
 
@@ -480,11 +497,11 @@ const App: React.FC = () => {
   if (gameState.status === GameStatus.LOBBY_WAITING || gameState.status === GameStatus.LOBBY_SETUP) {
       return (
           <div className="min-h-screen flex flex-col p-4 relative">
-              <Toast />
+              <Toast toast={toast} />
               {showSettingsModal && <SettingsModal />}
 
               <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-bold">{t('lobby', lang)}</h2>
+                  <h2 className="text-xl font-bold">{t('lobbySetup', lang)}</h2>
                   <div className="flex items-center gap-2">
                        {/* Settings Button */}
                        <button
@@ -497,7 +514,7 @@ const App: React.FC = () => {
                        </button>
 
                        <div className="flex items-center gap-2 bg-tg-secondaryBg px-3 py-1 rounded-lg border border-tg-hint/20">
-                          <span className="text-xs text-tg-hint uppercase">Code:</span>
+                          <span className="text-xs text-tg-hint uppercase">{t('codeLabel', lang)}</span>
                           <span className="text-xl font-mono font-bold tracking-widest select-all">{gameState.lobbyCode}</span>
                        </div>
                   </div>
@@ -506,13 +523,13 @@ const App: React.FC = () => {
               {/* API Key Warning for Captain */}
               {user?.isCaptain && (!gameState.settings.apiKey || gameState.settings.apiKey.length < 10) && (
                   <div className="bg-red-500/10 border border-red-500/50 p-3 rounded-xl mb-4 text-center animate-pulse">
-                      <p className="text-red-500 text-xs font-bold">⚠️ MISSING API KEY</p>
-                      <p className="text-tg-hint text-[10px]">You must set a Google Gemini API Key in settings (⚙️) to start.</p>
+                      <p className="text-red-500 text-xs font-bold">{t('missingApiKey', lang)}</p>
+                      <p className="text-tg-hint text-[10px]">{t('missingApiKeyDesc', lang)}</p>
                   </div>
               )}
 
               <div className="bg-tg-secondaryBg p-5 rounded-2xl border border-tg-hint/10 space-y-4 mb-4">
-                  <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">Game Settings</h3>
+                  <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">{t('gameSettings', lang)}</h3>
 
                   {/* Scenario Type Selection */}
                   <div
@@ -532,7 +549,7 @@ const App: React.FC = () => {
                                 ? 'bg-tg-button text-white border-transparent shadow-lg scale-105'
                                 : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'}`}
                           >
-                              {type.replace('_', ' ').toUpperCase()}
+                              {type.replace(/_/g, ' ').toUpperCase()}
                           </button>
                       ))}
                   </div>
@@ -607,7 +624,7 @@ const App: React.FC = () => {
                   </div>
               </div>
 
-              <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">Players</h3>
+              <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">{t('players', lang)}</h3>
               <div className="flex-grow space-y-2 overflow-y-auto">
                   {gameState.players.map(p => (
                       <div key={p.id} className={`flex items-center p-3 bg-tg-secondaryBg rounded-lg ${!p.isOnline ? 'opacity-50' : ''}`}>
@@ -644,7 +661,7 @@ const App: React.FC = () => {
           <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center space-y-6">
               <div className="w-16 h-16 border-4 border-tg-button border-t-transparent rounded-full animate-spin"></div>
               <h2 className="text-2xl font-bold animate-pulse">{t('generatingScenario', lang)}</h2>
-              <p className="text-tg-hint text-sm">Gemini 3 Pro is thinking...</p>
+              <p className="text-tg-hint text-sm">{t('geminiThinking', lang)}</p>
           </div>
       );
   }
@@ -653,7 +670,7 @@ const App: React.FC = () => {
       return (
           <div className="min-h-screen flex flex-col p-4">
               <div className="flex justify-between items-center mb-4 bg-tg-secondaryBg p-3 rounded-lg sticky top-0 z-10 shadow-lg">
-                  <span className="text-sm font-bold text-red-400">Time Left</span>
+                  <span className="text-sm font-bold text-red-400">{t('timeLeft', lang)}</span>
                   <span className="text-2xl font-mono font-bold text-red-500">{timeLeftDisplay}s</span>
               </div>
 
@@ -663,7 +680,7 @@ const App: React.FC = () => {
                           <img src={gameState.scenarioImage} alt="Scenario" className="w-full h-auto object-cover" />
                       </div>
                   )}
-                  <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">The Situation</h3>
+                  <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">{t('situation', lang)}</h3>
                   <MarkdownDisplay content={gameState.scenario || ''} />
               </div>
 
@@ -673,7 +690,7 @@ const App: React.FC = () => {
                     className="w-full flex-grow bg-tg-secondaryBg p-4 rounded-xl border border-tg-hint/20 focus:border-tg-button focus:outline-none resize-none"
                     placeholder={t('placeholderAction', lang)}
                     value={actionInput}
-                    onChange={(e) => setActionInput(e.target.value)}
+                    onChange={(e) => handleActionInputChange(e.target.value)}
                     disabled={user?.status === 'ready'}
                     maxLength={gameState.settings.charLimit}
                   />
@@ -685,10 +702,10 @@ const App: React.FC = () => {
 
               <div className="mt-4 pb-4">
                   {user?.status === 'ready' ? (
-                      <Button disabled className="bg-green-600 text-white">Action Submitted</Button>
+                      <Button disabled className="bg-green-600 text-white">{t('actionSubmitted', lang)}</Button>
                   ) : (
                       <Button onClick={() => handleSubmitAction(false)} isLoading={loading}>
-                          Submit
+                          {t('submit', lang)}
                       </Button>
                   )}
               </div>
@@ -705,7 +722,7 @@ const App: React.FC = () => {
                 <div className="w-4 h-4 bg-tg-button rounded-full animate-bounce delay-200"></div>
             </div>
             <h2 className="text-2xl font-bold">{t('judging', lang)}</h2>
-            <p className="text-tg-hint">Analyzing survival probabilities...</p>
+            <p className="text-tg-hint">{t('analyzing', lang)}</p>
         </div>
      );
   }
@@ -713,7 +730,7 @@ const App: React.FC = () => {
   if (gameState.status === GameStatus.RESULTS && gameState.roundResult) {
       return (
           <div className="min-h-screen flex flex-col p-4">
-              <h2 className="text-3xl font-black mb-6 text-center">RESULTS</h2>
+              <h2 className="text-3xl font-black mb-6 text-center">{t('results', lang)}</h2>
               
               {gameState.roundResult?.image && (
                   <div className="mb-6 rounded-2xl overflow-hidden shadow-2xl border border-tg-hint/20">
@@ -726,7 +743,7 @@ const App: React.FC = () => {
               </div>
 
               <div className="space-y-3 mb-8">
-                  <h3 className="text-sm font-bold text-tg-hint uppercase">Status Report</h3>
+                  <h3 className="text-sm font-bold text-tg-hint uppercase">{t('statusReport', lang)}</h3>
                   {gameState.players.map(p => {
                       const deathInfo = gameState.roundResult!.deaths.find(d => d.playerId === p.id);
                       return (
@@ -747,7 +764,7 @@ const App: React.FC = () => {
       );
   }
 
-  return <div className="p-10 text-center">Loading...</div>;
+  return <div className="p-10 text-center">{t('loading', lang)}</div>;
 };
 
 export default App;
