@@ -59,6 +59,11 @@ const App: React.FC = () => {
   const [actionInput, setActionInput] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+
+  // Settings Modal State
+  const [settingsNick, setSettingsNick] = useState('');
+  const [settingsApiKey, setSettingsApiKey] = useState('');
   
   // Toast State
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
@@ -120,6 +125,7 @@ const App: React.FC = () => {
     
     // Load persisted inputs
     const storedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME) || tgFirstName;
+    const storedKey = localStorage.getItem(STORAGE_KEYS.API_KEY) || '';
 
     // Default User State
     const playerObj: Player = {
@@ -149,6 +155,11 @@ const App: React.FC = () => {
       });
     });
 
+    const unsubscribeErrors = SocketService.subscribeToErrors((err) => {
+         setToast({ msg: err.message, type: 'error' });
+         triggerHaptic('error');
+    });
+
     // Deep Linking Check (Delayed to ensure socket connection or handled in connect)
     if (initData.start_param) {
       // We need to wait for user to be set/connection to be established?
@@ -156,7 +167,10 @@ const App: React.FC = () => {
       handleJoinLobby(initData.start_param, playerObj);
     }
 
-    return () => unsubscribe();
+    return () => {
+        unsubscribe();
+        unsubscribeErrors();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -263,6 +277,14 @@ const App: React.FC = () => {
 
   const handleStartGame = async () => {
     if (!gameState.lobbyCode) return;
+
+    // Client-side check for API Key before start (for Captain)
+    if (user?.isCaptain && (!gameState.settings.apiKey || gameState.settings.apiKey.length < 10)) {
+        setToast({ msg: "Please set a valid API Key in Settings first!", type: 'error' });
+        triggerHaptic('error');
+        return;
+    }
+
     SocketService.startGame(gameState.lobbyCode);
   };
 
@@ -316,6 +338,42 @@ const App: React.FC = () => {
       SocketService.resetGame(gameState.lobbyCode);
   };
 
+  // Settings Modal Handlers
+  const openSettings = () => {
+      setSettingsNick(user?.name || '');
+      setSettingsApiKey(gameState.settings.apiKey || '');
+      setShowSettingsModal(true);
+  };
+
+  const saveSettings = () => {
+      const cleanNick = settingsNick.trim();
+      const cleanKey = settingsApiKey.trim();
+
+      if (!cleanNick) {
+          setToast({ msg: t('nicknameRequired', lang), type: 'error' });
+          return;
+      }
+
+      // 1. Save Nickname
+      localStorage.setItem(STORAGE_KEYS.NICKNAME, cleanNick);
+      if (user && gameState.lobbyCode) {
+          SocketService.updatePlayer(gameState.lobbyCode, { name: cleanNick });
+          setUser({ ...user, name: cleanNick });
+      }
+
+      // 2. Save API Key (Captain only)
+      if (user?.isCaptain) {
+          localStorage.setItem(STORAGE_KEYS.API_KEY, cleanKey);
+          if (gameState.lobbyCode) {
+               SocketService.updateSettings(gameState.lobbyCode, { apiKey: cleanKey });
+          }
+      }
+
+      setShowSettingsModal(false);
+      setToast({ msg: "Settings Saved", type: 'success' });
+      triggerHaptic('success');
+  };
+
   // -- Renders --
   
   const Toast = () => (
@@ -328,6 +386,48 @@ const App: React.FC = () => {
        )}
        {toast?.msg}
     </div>
+  );
+
+  const SettingsModal = () => (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-tg-secondaryBg w-full max-w-sm rounded-2xl p-6 border border-tg-hint/20 shadow-2xl space-y-4">
+              <h3 className="text-xl font-bold text-center">Settings</h3>
+
+              <div className="space-y-2">
+                  <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('nickname', lang)}</label>
+                  <Input
+                      value={settingsNick}
+                      onChange={(e) => setSettingsNick(e.target.value)}
+                      placeholder={t('enterNickname', lang)}
+                  />
+              </div>
+
+              {user?.isCaptain && (
+                  <div className="space-y-2">
+                       <label className="text-xs text-tg-hint uppercase font-bold ml-1">Gemini API Key</label>
+                       <Input
+                          value={settingsApiKey}
+                          onChange={(e) => setSettingsApiKey(e.target.value)}
+                          placeholder="AI Studio Key"
+                          type="password"
+                          autoComplete="off"
+                       />
+                       <p className="text-[10px] text-tg-hint">
+                          Required to start the game. Get it from <a href="https://aistudio.google.com/api-keys" target="_blank" className="underline text-tg-link">Google AI Studio</a>.
+                       </p>
+                  </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                  <Button variant="secondary" onClick={() => setShowSettingsModal(false)}>
+                      Cancel
+                  </Button>
+                  <Button onClick={saveSettings}>
+                      Save
+                  </Button>
+              </div>
+          </div>
+      </div>
   );
 
   if (gameState.status === GameStatus.HOME) {
@@ -379,18 +479,41 @@ const App: React.FC = () => {
 
   if (gameState.status === GameStatus.LOBBY_WAITING || gameState.status === GameStatus.LOBBY_SETUP) {
       return (
-          <div className="min-h-screen flex flex-col p-4">
+          <div className="min-h-screen flex flex-col p-4 relative">
+              <Toast />
+              {showSettingsModal && <SettingsModal />}
+
               <div className="flex justify-between items-center mb-6">
                   <h2 className="text-xl font-bold">{t('lobby', lang)}</h2>
-                  <div className="flex items-center gap-2 bg-tg-secondaryBg px-3 py-1 rounded-lg border border-tg-hint/20">
-                      <span className="text-xs text-tg-hint uppercase">Code:</span>
-                      <span className="text-xl font-mono font-bold tracking-widest select-all">{gameState.lobbyCode}</span>
+                  <div className="flex items-center gap-2">
+                       {/* Settings Button */}
+                       <button
+                         onClick={openSettings}
+                         className="p-2 rounded-full bg-tg-secondaryBg border border-tg-hint/20 text-tg-hint hover:text-tg-text transition-colors"
+                       >
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                             <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+                           </svg>
+                       </button>
+
+                       <div className="flex items-center gap-2 bg-tg-secondaryBg px-3 py-1 rounded-lg border border-tg-hint/20">
+                          <span className="text-xs text-tg-hint uppercase">Code:</span>
+                          <span className="text-xl font-mono font-bold tracking-widest select-all">{gameState.lobbyCode}</span>
+                       </div>
                   </div>
               </div>
 
+              {/* API Key Warning for Captain */}
+              {user?.isCaptain && (!gameState.settings.apiKey || gameState.settings.apiKey.length < 10) && (
+                  <div className="bg-red-500/10 border border-red-500/50 p-3 rounded-xl mb-4 text-center animate-pulse">
+                      <p className="text-red-500 text-xs font-bold">⚠️ MISSING API KEY</p>
+                      <p className="text-tg-hint text-[10px]">You must set a Google Gemini API Key in settings (⚙️) to start.</p>
+                  </div>
+              )}
+
               <div className="bg-tg-secondaryBg p-5 rounded-2xl border border-tg-hint/10 space-y-4 mb-4">
                   <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">Game Settings</h3>
-                  
+
                   {/* Scenario Type Selection */}
                   <div
                     className="flex overflow-x-auto space-x-3 pb-2 scrollbar-hide cursor-grab active:cursor-grabbing"
@@ -498,7 +621,11 @@ const App: React.FC = () => {
 
               <div className="space-y-3 mt-6">
                  {user?.isCaptain ? (
-                     <Button onClick={handleStartGame} disabled={gameState.players.length < 2}>
+                     <Button
+                        onClick={handleStartGame}
+                        disabled={gameState.players.length < 2 || !gameState.settings.apiKey || gameState.settings.apiKey.length < 10}
+                        className={(!gameState.settings.apiKey || gameState.settings.apiKey.length < 10) ? 'opacity-50' : ''}
+                     >
                         {t('startGame', lang)}
                      </Button>
                  ) : (

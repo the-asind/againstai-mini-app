@@ -104,9 +104,29 @@ export class LobbyService {
     this.emitUpdate(code);
   }
 
+  public updatePlayer(code: string, playerId: string, updates: Partial<Player>) {
+    const lobby = this.lobbies.get(code);
+    if (!lobby) return;
+
+    const playerIndex = lobby.players.findIndex(p => p.id === playerId);
+    if (playerIndex !== -1) {
+        // Only allow updating specific fields for now (security)
+        if (updates.name) {
+             lobby.players[playerIndex].name = updates.name.substring(0, 20); // Limit length
+        }
+        this.emitUpdate(code);
+    }
+  }
+
   public async startGame(code: string, playerId: string) {
     if (!this.isCaptain(code, playerId)) return;
     const lobby = this.lobbies.get(code)!;
+
+    // API Key Validation Check
+    if (!lobby.settings.apiKey || lobby.settings.apiKey.length < 10) {
+        this.io.to(code).emit('error', { message: "Captain must set a valid API Key in settings before starting." });
+        return;
+    }
 
     lobby.status = GameStatus.SCENARIO_GENERATION;
     this.emitUpdate(code);
