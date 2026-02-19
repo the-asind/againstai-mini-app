@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel, ImageGenerationMode } from './types';
+import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel, ImageGenerationMode, ServerGameState, ScenarioResponse, TelegramWebApp } from './types';
 import { translations, t } from './i18n';
 import { DEFAULT_SETTINGS, MIN_TIME, MAX_TIME, MIN_CHARS, MAX_CHARS } from './constants';
 import { SocketService } from './services/socketService';
@@ -56,9 +56,6 @@ const App: React.FC = () => {
   });
 
   // UI State
-  const [homeView, setHomeView] = useState<'main' | 'create' | 'join'>('main');
-  const [apiKeyInput, setApiKeyInput] = useState('');
-  const [nicknameInput, setNicknameInput] = useState('');
   const [actionInput, setActionInput] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
@@ -109,7 +106,7 @@ const App: React.FC = () => {
           el.addEventListener('wheel', handleWheel, { passive: false });
           return () => el.removeEventListener('wheel', handleWheel);
       }
-  }, [homeView, gameState.status]); // Re-bind if view changes
+  }, [gameState.status]); // Re-bind if view changes
 
   // Initialize Telegram Web App & Load Persistence
   useEffect(() => {
@@ -122,19 +119,17 @@ const App: React.FC = () => {
     const tgFirstName = initData.user?.first_name || 'Survivor';
     
     // Load persisted inputs
-    const storedKey = localStorage.getItem(STORAGE_KEYS.API_KEY) || '';
     const storedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME) || tgFirstName;
 
-    setApiKeyInput(storedKey);
-    setNicknameInput(storedNick);
-
-    setUser({
+    // Default User State
+    const playerObj: Player = {
       id: userId,
       name: storedNick,
       isCaptain: false,
       status: 'waiting',
       isOnline: true
-    });
+    };
+    setUser(playerObj);
 
     // If no local override, use TG language
     if (!savedLang && initData.user?.language_code === 'ru') {
@@ -156,13 +151,6 @@ const App: React.FC = () => {
 
     // Deep Linking Check (Delayed to ensure socket connection or handled in connect)
     if (initData.start_param) {
-      const playerObj = { 
-        id: userId, 
-        name: storedNick, 
-        isCaptain: false, 
-        status: 'waiting' as const,
-        isOnline: true
-      };
       // We need to wait for user to be set/connection to be established?
       // Actually we can just call join. SocketService handles connection.
       handleJoinLobby(initData.start_param, playerObj);
@@ -201,32 +189,13 @@ const App: React.FC = () => {
 
   const handleCreateLobby = async () => {
     setErrorMsg('');
-    const cleanKey = apiKeyInput.trim();
-    const cleanNick = nicknameInput.trim();
-
-    if (!cleanNick) {
-        setErrorMsg(t('nicknameRequired', lang));
-        return;
-    }
-
-    // API Key Validation
-    if (!cleanKey) {
-      setErrorMsg(t('errorApiKey', lang));
-      return;
-    }
-    if (/[^\x20-\x7E]/.test(cleanKey)) {
-      setErrorMsg("API Key must contain only ASCII characters.");
-      return;
-    }
-
     if (!user) return;
 
-    // Persist Inputs
-    localStorage.setItem(STORAGE_KEYS.API_KEY, cleanKey);
-    localStorage.setItem(STORAGE_KEYS.NICKNAME, cleanNick);
+    // Use stored key or empty
+    const cleanKey = localStorage.getItem(STORAGE_KEYS.API_KEY) || '';
     
-    // Update User Name locally
-    const updatedUser = { ...user, name: cleanNick, isCaptain: true };
+    // Update User Name locally (redundant if we don't change it, but good for safety)
+    const updatedUser = { ...user, isCaptain: true };
     setUser(updatedUser);
     
     setLoading(true);
@@ -240,14 +209,7 @@ const App: React.FC = () => {
     setLoading(true);
 
     try {
-        // Validate Key First
-        const isValid = await SocketService.validateApiKey(cleanKey);
-        if (!isValid) {
-            setErrorMsg(t('errorApiKey', lang)); // Re-use generic error or create specific
-            setLoading(false);
-            return;
-        }
-
+        // Skip validation for instant creation
         await SocketService.createLobby(updatedUser, lobbySettings);
     } catch (e: any) {
         setErrorMsg(e.toString());
@@ -258,16 +220,10 @@ const App: React.FC = () => {
   const handleJoinLobby = async (code: string, playerObj = user) => {
     if (!code || !playerObj) return;
     
-    const cleanNick = nicknameInput.trim();
-    if (homeView === 'join') {
-        if (!cleanNick) {
-            setErrorMsg(t('nicknameRequired', lang));
-            return;
-        }
-        localStorage.setItem(STORAGE_KEYS.NICKNAME, cleanNick);
-        playerObj = { ...playerObj, name: cleanNick };
-        setUser(playerObj);
-    }
+    // Ensure name is consistent
+    const storedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME) || playerObj.name;
+    playerObj = { ...playerObj, name: storedNick };
+    setUser(playerObj);
 
     setErrorMsg('');
     setLoading(true);
@@ -393,268 +349,93 @@ const App: React.FC = () => {
             <p className="text-tg-hint text-xs max-w-xs mx-auto">{t('mockNote', lang)}</p>
         </div>
 
-        {homeView === 'main' && (
-            <div className="w-full max-w-sm space-y-4 animate-fade-in">
-                <Button onClick={() => setHomeView('create')}>
-                    {t('createLobby', lang)}
-                </Button>
-                
-                <div className="relative flex py-2 items-center">
-                    <div className="flex-grow border-t border-tg-hint/20"></div>
-                    <span className="flex-shrink mx-4 text-tg-hint text-xs uppercase">OR</span>
-                    <div className="flex-grow border-t border-tg-hint/20"></div>
-                </div>
+        <div className="w-full max-w-sm space-y-8 animate-fade-in">
+            {/* Create Lobby Button */}
+            <Button onClick={handleCreateLobby} isLoading={loading}>
+                {t('createLobby', lang)}
+            </Button>
 
-                <Button variant="secondary" onClick={() => setHomeView('join')}>
-                    {t('joinLobby', lang)}
-                </Button>
+            {/* Divider */}
+            <div className="relative flex py-2 items-center">
+                <div className="flex-grow border-t border-tg-hint/20"></div>
+                <span className="flex-shrink mx-4 text-tg-hint text-xs uppercase">OR</span>
+                <div className="flex-grow border-t border-tg-hint/20"></div>
             </div>
-        )}
 
-        {homeView === 'create' && (
-             <form 
-                className="w-full max-w-sm space-y-6 animate-fade-in"
-                onSubmit={(e) => { e.preventDefault(); handleCreateLobby(); }}
-             >
-                <div className="bg-tg-secondaryBg p-5 rounded-2xl space-y-4 border border-tg-hint/10">
-                    <h3 className="text-lg font-bold text-center">{t('lobbySetup', lang)}</h3>
-                    
-                    <div className="space-y-2">
-                        <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('nickname', lang)}</label>
-                        <Input 
-                            value={nicknameInput}
-                            onChange={(e) => setNicknameInput(e.target.value)}
-                            placeholder={t('enterNickname', lang)}
-                            required
-                        />
-                    </div>
-
-                    <div className="space-y-2">
-                         <label className="text-xs text-tg-hint uppercase font-bold ml-1">Gemini API Key</label>
-                         <Input 
-                            name="gemini-api-key"
-                            autoComplete="current-password"
-                            value={apiKeyInput}
-                            onChange={(e) => setApiKeyInput(e.target.value)}
-                            placeholder="AI Studio Key"
-                            type="password"
-                            required
-                         />
-                         <p className="text-xs text-tg-hint leading-relaxed">
-                            {t('apiKeyHintPrefix', lang)}
-                            <a 
-                                href="https://aistudio.google.com/api-keys" 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="text-tg-link underline font-bold"
-                            >
-                                {t('apiKeyLink', lang)}
-                            </a>
-                         </p>
-                    </div>
-                </div>
-
-                <div className="flex gap-3">
-                    <Button type="button" variant="secondary" onClick={() => setHomeView('main')} className="w-1/3">
-                        {t('back', lang)}
-                    </Button>
-                    <Button type="submit" isLoading={loading} className="w-2/3">
-                        {t('continue', lang)}
-                    </Button>
-                </div>
-                {errorMsg && <p className="text-red-500 text-sm text-center">{errorMsg}</p>}
-             </form>
-        )}
-
-        {homeView === 'join' && (
-            <div className="w-full max-w-sm space-y-8 animate-fade-in">
-                <div className="bg-tg-secondaryBg p-5 rounded-2xl space-y-4 border border-tg-hint/10">
-                    <h3 className="text-lg font-bold text-center">{t('joinLobby', lang)}</h3>
-
-                    <div className="space-y-2">
-                        <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('nickname', lang)}</label>
-                        <Input 
-                            value={nicknameInput}
-                            onChange={(e) => setNicknameInput(e.target.value)}
-                            placeholder={t('enterNickname', lang)}
-                            required
-                        />
-                    </div>
-
-                    <div className="space-y-2 pt-2">
-                        <label className="text-xs text-tg-hint uppercase font-bold ml-1 text-center block">{t('enterCode', lang)}</label>
-                        <CodeInput 
-                            onComplete={(code) => handleJoinLobby(code)}
-                            hasError={!!errorMsg}
-                            disabled={loading || !nicknameInput.trim()}
-                        />
-                    </div>
-                </div>
-
-                <div className="flex gap-3">
-                    <Button type="button" variant="secondary" onClick={() => setHomeView('main')}>
-                        {t('back', lang)}
-                    </Button>
-                </div>
-                {errorMsg && <p className="text-red-500 text-sm text-center font-bold animate-pulse">{errorMsg}</p>}
+            {/* Join Lobby Code Input */}
+            <div className="space-y-2">
+                 <label className="text-xs text-tg-hint uppercase font-bold text-center block tracking-widest">{t('enterCode', lang)}</label>
+                 <CodeInput
+                    onComplete={(code) => handleJoinLobby(code)}
+                    hasError={!!errorMsg}
+                    disabled={loading}
+                 />
+                 {errorMsg && <p className="text-red-500 text-sm text-center font-bold animate-pulse mt-2">{errorMsg}</p>}
             </div>
-        )}
+        </div>
       </div>
     );
   }
 
   if (gameState.status === GameStatus.LOBBY_WAITING || gameState.status === GameStatus.LOBBY_SETUP) {
       return (
-          <div className="min-h-screen p-6 flex flex-col">
-              <Toast />
+          <div className="min-h-screen flex flex-col p-4">
               <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-bold text-tg-hint">Lobby: <span className="text-tg-text font-mono">{gameState.lobbyCode}</span></h2>
-                  <span className="px-2 py-1 bg-green-900 text-green-200 text-xs rounded-full">
-                      {gameState.players.length} Players
-                  </span>
+                  <h2 className="text-xl font-bold">{t('lobby', lang)}</h2>
+                  <div className="flex items-center gap-2 bg-tg-secondaryBg px-3 py-1 rounded-lg border border-tg-hint/20">
+                      <span className="text-xs text-tg-hint uppercase">Code:</span>
+                      <span className="text-xl font-mono font-bold tracking-widest select-all">{gameState.lobbyCode}</span>
+                  </div>
               </div>
 
-              <div className="bg-tg-secondaryBg p-4 rounded-xl mb-6 space-y-4 border border-tg-hint/10">
-                  <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider">{t('settings', lang)}</h3>
+              <div className="bg-tg-secondaryBg p-5 rounded-2xl border border-tg-hint/10 space-y-4 mb-4">
+                  <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">Game Settings</h3>
                   
-                  {/* Game Mode Selector */}
-                  <div className="mb-4">
-                      <div className="flex justify-between text-sm mb-2">
-                          <span>{t('gameMode', lang)}</span>
-                      </div>
-                      <div className="flex flex-col gap-2">
-                          {Object.values(GameMode).map((mode) => (
-                             <button
-                                key={mode}
-                                onClick={() => handleUpdateSettings('mode', mode)}
-                                disabled={!user?.isCaptain}
-                                className={`p-3 rounded-lg border transition-all text-left group
-                                    ${gameState.settings.mode === mode 
-                                        ? 'bg-tg-button text-white border-transparent' 
-                                        : 'bg-tg-bg text-tg-text border-tg-hint/10 hover:bg-tg-bg/80'
-                                    }
-                                    ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
-                                `}
-                             >
-                                 <div className="text-xs font-bold uppercase mb-1">
-                                     {mode === GameMode.COOP && t('coop', lang)}
-                                     {mode === GameMode.PVP && t('pvp', lang)}
-                                     {mode === GameMode.BATTLE_ROYALE && t('battleRoyale', lang)}
-                                 </div>
-                                 <div className={`text-[10px] leading-relaxed ${gameState.settings.mode === mode ? 'text-white/80' : 'text-tg-hint'}`}>
-                                     {mode === GameMode.COOP && t('coopDesc', lang)}
-                                     {mode === GameMode.PVP && t('pvpDesc', lang)}
-                                     {mode === GameMode.BATTLE_ROYALE && t('battleRoyaleDesc', lang)}
-                                 </div>
-                             </button>
-                          ))}
-                      </div>
+                  {/* Scenario Type Selection */}
+                  <div
+                    className="flex overflow-x-auto space-x-3 pb-2 scrollbar-hide cursor-grab active:cursor-grabbing"
+                    ref={scrollContainerRef}
+                    onMouseDown={handleMouseDown}
+                    onMouseLeave={handleMouseLeave}
+                    onMouseUp={handleMouseUp}
+                    onMouseMove={handleMouseMove}
+                  >
+                      {Object.values(ScenarioType).map(type => (
+                          <button
+                            key={type}
+                            onClick={() => handleUpdateSettings('scenarioType', type)}
+                            disabled={!user?.isCaptain}
+                            className={`flex-shrink-0 px-4 py-2 rounded-xl border transition-all ${gameState.settings.scenarioType === type
+                                ? 'bg-tg-button text-white border-transparent shadow-lg scale-105'
+                                : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'}`}
+                          >
+                              {type.replace('_', ' ').toUpperCase()}
+                          </button>
+                      ))}
                   </div>
 
-                  {/* Scenario Type Selector (Wrapped Grid) */}
-                  <div className="mb-4">
-                      <div className="flex justify-between text-sm mb-2">
-                          <span>{t('scenarioType', lang)}</span>
-                      </div>
-                      <div className="flex flex-wrap gap-2 justify-center">
-                          {Object.values(ScenarioType).map((type) => (
-                             <button
-                                key={type}
-                                onClick={() => handleUpdateSettings('scenarioType', type)}
-                                disabled={!user?.isCaptain}
-                                className={`px-4 py-2 text-xs font-bold uppercase rounded-full border transition-all
-                                    ${gameState.settings.scenarioType === type 
-                                        ? 'bg-tg-button text-white border-transparent' 
-                                        : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
-                                    }
-                                    ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
-                                `}
-                             >
-                                 {type === ScenarioType.ANY && t('any', lang)}
-                                 {type === ScenarioType.SCI_FI && t('scifi', lang)}
-                                 {type === ScenarioType.SUPERNATURAL && t('supernatural', lang)}
-                                 {type === ScenarioType.APOCALYPSE && t('apocalypse', lang)}
-                                 {type === ScenarioType.FANTASY && t('fantasy', lang)}
-                                 {type === ScenarioType.CYBERPUNK && t('cyberpunk', lang)}
-                                 {type === ScenarioType.BACKROOMS && t('backrooms', lang)}
-                                 {type === ScenarioType.SCP && t('scp', lang)}
-                                 {type === ScenarioType.MINECRAFT && t('minecraft', lang)}
-                                 {type === ScenarioType.HARRY_POTTER && t('harryPotter', lang)}
-                             </button>
-                          ))}
-                      </div>
+                  {/* Mode Selection */}
+                  <div className="grid grid-cols-3 gap-2">
+                      {Object.values(GameMode).map(mode => (
+                          <button
+                            key={mode}
+                            onClick={() => handleUpdateSettings('mode', mode)}
+                            disabled={!user?.isCaptain}
+                            className={`py-2 text-xs font-bold uppercase rounded-lg border transition-all ${gameState.settings.mode === mode
+                                ? 'bg-tg-button text-white border-transparent'
+                                : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'}`}
+                          >
+                              {mode === GameMode.BATTLE_ROYALE ? 'ROYALE' : mode}
+                          </button>
+                      ))}
                   </div>
 
-                  {/* Image Generation Mode */}
+                  {/* Language Selection */}
                   <div>
                       <div className="flex justify-between text-sm mb-2">
-                          <span>{t('imageGenerationMode', lang)}</span>
+                          <span>{t('storyLang', lang)}</span>
                       </div>
-                      <div className="flex bg-tg-bg p-1 rounded-lg">
-                          {(Object.values(ImageGenerationMode) as ImageGenerationMode[]).map((mode) => (
-                             <button
-                                key={mode}
-                                onClick={() => handleUpdateSettings('imageGenerationMode', mode)}
-                                disabled={!user?.isCaptain}
-                                className={`flex-1 py-2 text-[10px] font-bold uppercase rounded-lg transition-all flex flex-col items-center justify-center gap-1
-                                    ${gameState.settings.imageGenerationMode === mode
-                                        ? 'bg-tg-button text-white'
-                                        : 'text-tg-hint opacity-70 hover:bg-tg-bg/80'
-                                    }
-                                    ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
-                                `}
-                             >
-                                 <span>
-                                     {mode === ImageGenerationMode.NONE && t('imgNone', lang)}
-                                     {mode === ImageGenerationMode.SCENARIO && t('imgScenario', lang)}
-                                     {mode === ImageGenerationMode.FULL && t('imgFull', lang)}
-                                 </span>
-                             </button>
-                          ))}
-                      </div>
-                  </div>
-
-                  {/* Time Limit */}
-                  <div>
-                      <div className="flex justify-between text-sm mb-1">
-                          <span>{t('timeLimit', lang)}</span>
-                          <span className="font-mono text-tg-button">{gameState.settings.timeLimitSeconds} {t('seconds', lang)}</span>
-                      </div>
-                      <input 
-                          type="range" 
-                          min={MIN_TIME} max={MAX_TIME} step={10}
-                          value={gameState.settings.timeLimitSeconds}
-                          onChange={(e) => handleUpdateSettings('timeLimitSeconds', Number(e.target.value))}
-                          disabled={!user?.isCaptain}
-                          className={`w-full h-2 bg-tg-bg rounded-lg appearance-none cursor-pointer ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      />
-                  </div>
-
-                  {/* Char Limit */}
-                  <div>
-                      <div className="flex justify-between text-sm mb-1">
-                          <span>{t('charLimit', lang)}</span>
-                          <span className="font-mono text-tg-button">{gameState.settings.charLimit} {t('chars', lang)}</span>
-                      </div>
-                       <input 
-                          type="range" 
-                          min={MIN_CHARS} max={MAX_CHARS} step={100}
-                          value={gameState.settings.charLimit}
-                          onChange={(e) => handleUpdateSettings('charLimit', Number(e.target.value))}
-                          disabled={!user?.isCaptain}
-                          className={`w-full h-2 bg-tg-bg rounded-lg appearance-none cursor-pointer ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      />
-                  </div>
-
-                  {/* Story Language */}
-                  <div className={`transition-all duration-300 ${!gameState.settings.storyLanguage && user?.isCaptain ? 'p-2 rounded-lg border-2 border-red-500/50 bg-red-500/10' : ''}`}>
-                      <div className="flex justify-between text-sm mb-2 items-center">
-                          <span>{t('storyLanguage', lang)}</span>
-                          {!gameState.settings.storyLanguage && user?.isCaptain && (
-                              <span className="text-red-500 text-xs font-bold animate-pulse">Required *</span>
-                          )}
-                      </div>
-                      <div className="flex bg-tg-bg p-1 rounded-lg">
+                      <div className="flex gap-2 p-1 bg-tg-bg rounded-lg">
                           <button 
                             onClick={() => handleUpdateSettings('storyLanguage', 'en')}
                             disabled={!user?.isCaptain}
