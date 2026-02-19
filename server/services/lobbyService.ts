@@ -104,9 +104,34 @@ export class LobbyService {
     this.emitUpdate(code);
   }
 
+  public updatePlayer(code: string, playerId: string, updates: Partial<Player>) {
+    const lobby = this.lobbies.get(code);
+    if (!lobby) return;
+
+    const player = lobby.players.find(p => p.id === playerId);
+    if (player) {
+        let changed = false;
+        // Only allow updating specific fields for now (security)
+        if (updates.name && updates.name.trim() !== '' && updates.name !== player.name) {
+             player.name = updates.name.substring(0, 20); // Limit length
+             changed = true;
+        }
+
+        if (changed) {
+            this.emitUpdate(code);
+        }
+    }
+  }
+
   public async startGame(code: string, playerId: string) {
     if (!this.isCaptain(code, playerId)) return;
     const lobby = this.lobbies.get(code)!;
+
+    // API Key Validation Check
+    if (!lobby.settings.apiKey || lobby.settings.apiKey.length < 10) {
+        this.io.to(code).emit('error', { errorCode: 'ERR_MISSING_API_KEY', message: "Captain must set a valid API Key in settings before starting." });
+        return;
+    }
 
     lobby.status = GameStatus.SCENARIO_GENERATION;
     this.emitUpdate(code);

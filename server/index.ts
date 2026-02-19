@@ -120,6 +120,11 @@ io.on('connection', (socket) => {
      }
   });
 
+  socket.on('update_player', ({ code, updates }: { code: string, updates: Partial<Player> }) => {
+      // Any player can update their OWN data
+      lobbyService.updatePlayer(code, user.id.toString(), updates);
+  });
+
   socket.on('start_game', ({ code }: { code: string }) => {
       if (lobbyService.isCaptain(code, user.id.toString())) {
           lobbyService.startGame(code, user.id.toString());

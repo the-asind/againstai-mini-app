@@ -4,10 +4,12 @@ import { GameState, LobbySettings, Player, GameStatus } from '../types';
 const URL = import.meta.env.VITE_API_URL || undefined; // undefined = auto-detect host
 
 type GameStateCallback = (state: GameState) => void;
+type ErrorCallback = (error: { message: string }) => void;
 
 class SocketServiceImpl {
   private socket: Socket | null = null;
   private subscribers: GameStateCallback[] = [];
+  private errorSubscribers: ErrorCallback[] = [];
 
   // Session State for Reconnection
   private currentLobbyCode: string | null = null;
@@ -47,7 +49,7 @@ class SocketServiceImpl {
 
     this.socket.on('error', (err: { message: string }) => {
         console.error("Server Error:", err.message);
-        // Could dispatch to UI
+        this.notifyErrorSubscribers(err);
     });
   }
 
@@ -58,8 +60,19 @@ class SocketServiceImpl {
       };
   }
 
+  public subscribeToErrors(callback: ErrorCallback): () => void {
+      this.errorSubscribers.push(callback);
+      return () => {
+          this.errorSubscribers = this.errorSubscribers.filter(s => s !== callback);
+      };
+  }
+
   private notifySubscribers(state: GameState) {
       this.subscribers.forEach(cb => cb(state));
+  }
+
+  private notifyErrorSubscribers(error: { message: string }) {
+      this.errorSubscribers.forEach(cb => cb(error));
   }
 
   public async validateApiKey(apiKey: string): Promise<boolean> {
@@ -106,6 +119,15 @@ class SocketServiceImpl {
 
   public updateSettings(code: string, settings: Partial<LobbySettings>) {
       this.socket?.emit('update_settings', { code, settings });
+  }
+
+  public updatePlayer(code: string, updates: Partial<Player>) {
+      this.socket?.emit('update_player', { code, updates });
+
+      // Update local session state if name changed
+      if (updates.name && this.currentPlayer) {
+          this.currentPlayer = { ...this.currentPlayer, name: updates.name };
+      }
   }
 
   public startGame(code: string) {

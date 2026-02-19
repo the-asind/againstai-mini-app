@@ -16,12 +16,82 @@ const STORAGE_KEYS = {
     LANG: 'against_ai_ui_lang'
 };
 
+// Extracted Components
+const Toast = ({ toast }: { toast: { msg: string, type: 'success' | 'error' } | null }) => (
+    <div className={`fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-full shadow-2xl z-50 transition-all duration-300 ${toast ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5 pointer-events-none'}
+      ${toast?.type === 'error' ? 'bg-red-600' : 'bg-green-600'} text-white font-bold flex items-center gap-2`}>
+       {toast?.type === 'success' && (
+           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+             <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+           </svg>
+       )}
+       {toast?.msg}
+    </div>
+);
+
+interface SettingsModalProps {
+    settingsNick: string;
+    setSettingsNick: (val: string) => void;
+    settingsApiKey: string;
+    setSettingsApiKey: (val: string) => void;
+    saveSettings: () => void;
+    setShowSettingsModal: (val: boolean) => void;
+    lang: Language;
+    user: Player | null;
+}
+
+const SettingsModal: React.FC<SettingsModalProps> = ({
+    settingsNick, setSettingsNick, settingsApiKey, setSettingsApiKey,
+    saveSettings, setShowSettingsModal, lang, user
+}) => (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+        <div className="bg-tg-secondaryBg w-full max-w-sm rounded-2xl p-6 border border-tg-hint/20 shadow-2xl space-y-4">
+            <h3 className="text-xl font-bold text-center">{t('settingsTitle', lang)}</h3>
+
+            <div className="space-y-2">
+                <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('nickname', lang)}</label>
+                <Input
+                    value={settingsNick}
+                    onChange={(e) => setSettingsNick(e.target.value)}
+                    placeholder={t('enterNickname', lang)}
+                />
+            </div>
+
+            {user?.isCaptain && (
+                <div className="space-y-2">
+                     <label className="text-xs text-tg-hint uppercase font-bold ml-1">Gemini API Key</label>
+                     <Input
+                        value={settingsApiKey}
+                        onChange={(e) => setSettingsApiKey(e.target.value)}
+                        placeholder="AI Studio Key"
+                        type="password"
+                        autoComplete="off"
+                     />
+                     <p className="text-[10px] text-tg-hint">
+                        {t('apiKeyHintPrefix', lang)} <a href="https://aistudio.google.com/api-keys" target="_blank" className="underline text-tg-link">{t('apiKeyLink', lang)}</a>.
+                     </p>
+                </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+                <Button variant="secondary" onClick={() => setShowSettingsModal(false)}>
+                    {t('cancel', lang)}
+                </Button>
+                <Button onClick={saveSettings}>
+                    {t('save', lang)}
+                </Button>
+            </div>
+        </div>
+    </div>
+);
+
 const App: React.FC = () => {
   // -- Initialization & State --
   
-  // 1. Load Language
-  const savedLang = localStorage.getItem(STORAGE_KEYS.LANG) as Language | null;
-  const [lang, setLangState] = useState<'en' | 'ru'>(savedLang || 'en');
+  // 1. Load Language (Lazy Init)
+  const [lang, setLangState] = useState<'en' | 'ru'>(() =>
+      (localStorage.getItem(STORAGE_KEYS.LANG) as Language) || 'en'
+  );
 
   // Wrapper to save lang on change
   const setLang = (l: Language) => {
@@ -31,8 +101,8 @@ const App: React.FC = () => {
 
   const [user, setUser] = useState<Player | null>(null);
   
-  // 2. Load Settings (Merge with defaults to handle versioning)
-  const loadSavedSettings = (): LobbySettings => {
+  // 2. Load Settings (Lazy Init)
+  const [initialSettings] = useState<LobbySettings>(() => {
       try {
           const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
           if (saved) {
@@ -42,9 +112,7 @@ const App: React.FC = () => {
           console.error("Failed to parse settings", e);
       }
       return DEFAULT_SETTINGS;
-  };
-
-  const [initialSettings] = useState<LobbySettings>(loadSavedSettings());
+  });
 
   // Game State
   const [gameState, setGameState] = useState<GameState>({
@@ -56,12 +124,14 @@ const App: React.FC = () => {
   });
 
   // UI State
-  const [homeView, setHomeView] = useState<'main' | 'create' | 'join'>('main');
-  const [apiKeyInput, setApiKeyInput] = useState('');
-  const [nicknameInput, setNicknameInput] = useState('');
   const [actionInput, setActionInput] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+
+  // Settings Modal State
+  const [settingsNick, setSettingsNick] = useState('');
+  const [settingsApiKey, setSettingsApiKey] = useState('');
   
   // Toast State
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
@@ -70,6 +140,7 @@ const App: React.FC = () => {
   const timeLeftRef = useRef<number>(0);
   const [timeLeftDisplay, setTimeLeftDisplay] = useState(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const actionInputRef = useRef(''); // Ref for current input to avoid stale closures
 
   // Drag Scroll State
   const [isDragging, setIsDragging] = useState(false);
@@ -82,6 +153,12 @@ const App: React.FC = () => {
     if (tg.isVersionAtLeast && tg.isVersionAtLeast('6.1')) {
       tg.HapticFeedback.notificationOccurred(type);
     }
+  };
+
+  // Sync state to ref
+  const handleActionInputChange = (val: string) => {
+      setActionInput(val);
+      actionInputRef.current = val;
   };
 
   // -- Effects --
@@ -109,7 +186,7 @@ const App: React.FC = () => {
           el.addEventListener('wheel', handleWheel, { passive: false });
           return () => el.removeEventListener('wheel', handleWheel);
       }
-  }, [homeView, gameState.status]); // Re-bind if view changes
+  }, [gameState.status]); // Re-bind if view changes
 
   // Initialize Telegram Web App & Load Persistence
   useEffect(() => {
@@ -122,22 +199,20 @@ const App: React.FC = () => {
     const tgFirstName = initData.user?.first_name || 'Survivor';
     
     // Load persisted inputs
-    const storedKey = localStorage.getItem(STORAGE_KEYS.API_KEY) || '';
     const storedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME) || tgFirstName;
 
-    setApiKeyInput(storedKey);
-    setNicknameInput(storedNick);
-
-    setUser({
+    // Default User State
+    const playerObj: Player = {
       id: userId,
       name: storedNick,
       isCaptain: false,
       status: 'waiting',
       isOnline: true
-    });
+    };
+    setUser(playerObj);
 
     // If no local override, use TG language
-    if (!savedLang && initData.user?.language_code === 'ru') {
+    if (!localStorage.getItem(STORAGE_KEYS.LANG) && initData.user?.language_code === 'ru') {
         setLang('ru');
     }
 
@@ -149,26 +224,28 @@ const App: React.FC = () => {
         if (newState.status === GameStatus.PLAYER_INPUT && prevState.status !== GameStatus.PLAYER_INPUT) {
             timeLeftRef.current = newState.settings.timeLimitSeconds;
             setTimeLeftDisplay(newState.settings.timeLimitSeconds);
+            // Reset input on new round
+            setActionInput("");
+            actionInputRef.current = "";
         }
         return newState;
       });
     });
 
+    const unsubscribeErrors = SocketService.subscribeToErrors((err) => {
+         setToast({ msg: err.message, type: 'error' });
+         triggerHaptic('error');
+    });
+
     // Deep Linking Check (Delayed to ensure socket connection or handled in connect)
     if (initData.start_param) {
-      const playerObj = { 
-        id: userId, 
-        name: storedNick, 
-        isCaptain: false, 
-        status: 'waiting' as const,
-        isOnline: true
-      };
-      // We need to wait for user to be set/connection to be established?
-      // Actually we can just call join. SocketService handles connection.
       handleJoinLobby(initData.start_param, playerObj);
     }
 
-    return () => unsubscribe();
+    return () => {
+        unsubscribe();
+        unsubscribeErrors();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -201,35 +278,12 @@ const App: React.FC = () => {
 
   const handleCreateLobby = async () => {
     setErrorMsg('');
-    const cleanKey = apiKeyInput.trim();
-    const cleanNick = nicknameInput.trim();
-
-    if (!cleanNick) {
-        setErrorMsg(t('nicknameRequired', lang));
-        return;
-    }
-
-    // API Key Validation
-    if (!cleanKey) {
-      setErrorMsg(t('errorApiKey', lang));
-      return;
-    }
-    if (/[^\x20-\x7E]/.test(cleanKey)) {
-      setErrorMsg("API Key must contain only ASCII characters.");
-      return;
-    }
-
     if (!user) return;
 
-    // Persist Inputs
-    localStorage.setItem(STORAGE_KEYS.API_KEY, cleanKey);
-    localStorage.setItem(STORAGE_KEYS.NICKNAME, cleanNick);
-    
-    // Update User Name locally
-    const updatedUser = { ...user, name: cleanNick, isCaptain: true };
-    setUser(updatedUser);
-    
     setLoading(true);
+
+    // Use stored key or empty
+    const cleanKey = localStorage.getItem(STORAGE_KEYS.API_KEY) || '';
 
     // Use current persisted settings + new API Key
     const lobbySettings: LobbySettings = { 
@@ -237,47 +291,42 @@ const App: React.FC = () => {
       apiKey: cleanKey 
     };
 
-    setLoading(true);
-
     try {
-        // Validate Key First
-        const isValid = await SocketService.validateApiKey(cleanKey);
-        if (!isValid) {
-            setErrorMsg(t('errorApiKey', lang)); // Re-use generic error or create specific
-            setLoading(false);
-            return;
-        }
-
-        await SocketService.createLobby(updatedUser, lobbySettings);
+        // Skip validation for instant creation
+        const newUser = { ...user, isCaptain: true };
+        await SocketService.createLobby(newUser, lobbySettings);
+        // Only update user state on success
+        setUser(newUser);
     } catch (e: any) {
         setErrorMsg(e.toString());
+    } finally {
+        setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleJoinLobby = async (code: string, playerObj = user) => {
     if (!code || !playerObj) return;
     
-    const cleanNick = nicknameInput.trim();
-    if (homeView === 'join') {
-        if (!cleanNick) {
-            setErrorMsg(t('nicknameRequired', lang));
-            return;
-        }
-        localStorage.setItem(STORAGE_KEYS.NICKNAME, cleanNick);
-        playerObj = { ...playerObj, name: cleanNick };
-        setUser(playerObj);
-    }
+    // Ensure name is consistent
+    const storedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME) || playerObj.name;
+    const updatedPlayerObj = { ...playerObj, name: storedNick };
+    setUser(updatedPlayerObj);
 
     setErrorMsg('');
     setLoading(true);
     
-    const success = await SocketService.joinLobby(code, playerObj);
-    if (!success) {
-        setErrorMsg(t('lobbyNotFound', lang));
+    try {
+        const success = await SocketService.joinLobby(code, updatedPlayerObj);
+        if (!success) {
+            setErrorMsg(t('lobbyNotFound', lang));
+            triggerHaptic('error');
+        }
+    } catch (e) {
+        setErrorMsg(t('lobbyNotFound', lang)); // Generic error for now
         triggerHaptic('error');
+    } finally {
+        setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleUpdateSettings = (key: keyof LobbySettings, value: any) => {
@@ -307,6 +356,14 @@ const App: React.FC = () => {
 
   const handleStartGame = async () => {
     if (!gameState.lobbyCode) return;
+
+    // Client-side check for API Key before start (for Captain)
+    if (user?.isCaptain && (!gameState.settings.apiKey || gameState.settings.apiKey.length < 10)) {
+        setToast({ msg: "Please set a valid API Key in Settings first!", type: 'error' });
+        triggerHaptic('error');
+        return;
+    }
+
     SocketService.startGame(gameState.lobbyCode);
   };
 
@@ -322,7 +379,8 @@ const App: React.FC = () => {
            clearInterval(interval);
            // Auto-submit logic is handled by server timeout.
            // But we can submit partial text if we want to be safe.
-           if (actionInput.trim()) {
+           // Use Ref to avoid stale closure
+           if (actionInputRef.current.trim()) {
                handleSubmitAction(true);
            }
         }
@@ -335,7 +393,8 @@ const App: React.FC = () => {
   const handleSubmitAction = async (force = false) => {
     if (!user || !gameState.lobbyCode) return;
     
-    let currentInput = actionInput.trim();
+    // Use Ref for latest input
+    let currentInput = actionInputRef.current.trim();
 
     if (!currentInput && !force) return;
 
@@ -350,34 +409,60 @@ const App: React.FC = () => {
     
     // Server performs cheat detection now
     SocketService.submitAction(gameState.lobbyCode, currentInput);
+
+    // Optimistic Update
+    setUser(prev => prev ? ({ ...prev, status: 'ready' }) : null);
+
     setLoading(false);
   };
 
   const handleRestart = () => {
       if (!gameState.lobbyCode) return;
-      setActionInput("");
+      handleActionInputChange("");
       setErrorMsg("");
       SocketService.resetGame(gameState.lobbyCode);
   };
 
-  // -- Renders --
-  
-  const Toast = () => (
-    <div className={`fixed bottom-10 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-full shadow-2xl z-50 transition-all duration-300 ${toast ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5 pointer-events-none'} 
-      ${toast?.type === 'error' ? 'bg-red-600' : 'bg-green-600'} text-white font-bold flex items-center gap-2`}>
-       {toast?.type === 'success' && (
-           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-             <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-           </svg>
-       )}
-       {toast?.msg}
-    </div>
-  );
+  // Settings Modal Handlers
+  const openSettings = () => {
+      setSettingsNick(user?.name || '');
+      setSettingsApiKey(gameState.settings.apiKey || '');
+      setShowSettingsModal(true);
+  };
+
+  const saveSettings = () => {
+      const cleanNick = settingsNick.trim();
+      const cleanKey = settingsApiKey.trim();
+
+      if (!cleanNick) {
+          setToast({ msg: t('nicknameRequired', lang), type: 'error' });
+          return;
+      }
+
+      // 1. Save Nickname
+      localStorage.setItem(STORAGE_KEYS.NICKNAME, cleanNick);
+      if (user && gameState.lobbyCode) {
+          SocketService.updatePlayer(gameState.lobbyCode, { name: cleanNick });
+          setUser({ ...user, name: cleanNick });
+      }
+
+      // 2. Save API Key (Captain only)
+      if (user?.isCaptain) {
+          localStorage.setItem(STORAGE_KEYS.API_KEY, cleanKey);
+          if (gameState.lobbyCode) {
+               SocketService.updateSettings(gameState.lobbyCode, { apiKey: cleanKey });
+          }
+      }
+
+      setShowSettingsModal(false);
+      setToast({ msg: t('save', lang), type: 'success' });
+      triggerHaptic('success');
+  };
 
   if (gameState.status === GameStatus.HOME) {
     return (
       <div className="min-h-screen p-6 flex flex-col items-center relative">
-        <Toast />
+        <Toast toast={toast} />
         {/* Lang Switch */}
         <div className="absolute top-4 right-4 flex gap-2 text-sm font-bold z-10">
             <button onClick={() => setLang('en')} className={lang === 'en' ? 'text-tg-button' : 'text-tg-hint'}>EN</button>
@@ -393,268 +478,127 @@ const App: React.FC = () => {
             <p className="text-tg-hint text-xs max-w-xs mx-auto">{t('mockNote', lang)}</p>
         </div>
 
-        {homeView === 'main' && (
-            <div className="w-full max-w-sm space-y-4 animate-fade-in">
-                <Button onClick={() => setHomeView('create')}>
-                    {t('createLobby', lang)}
-                </Button>
-                
-                <div className="relative flex py-2 items-center">
-                    <div className="flex-grow border-t border-tg-hint/20"></div>
-                    <span className="flex-shrink mx-4 text-tg-hint text-xs uppercase">OR</span>
-                    <div className="flex-grow border-t border-tg-hint/20"></div>
-                </div>
+        <div className="w-full max-w-sm space-y-8 animate-fade-in">
+            {/* Create Lobby Button */}
+            <Button onClick={handleCreateLobby} isLoading={loading}>
+                {t('createLobby', lang)}
+            </Button>
 
-                <Button variant="secondary" onClick={() => setHomeView('join')}>
-                    {t('joinLobby', lang)}
-                </Button>
+            {/* Divider */}
+            <div className="relative flex py-2 items-center">
+                <div className="flex-grow border-t border-tg-hint/20"></div>
+                <span className="flex-shrink mx-4 text-tg-hint text-xs uppercase">{t('or', lang)}</span>
+                <div className="flex-grow border-t border-tg-hint/20"></div>
             </div>
-        )}
 
-        {homeView === 'create' && (
-             <form 
-                className="w-full max-w-sm space-y-6 animate-fade-in"
-                onSubmit={(e) => { e.preventDefault(); handleCreateLobby(); }}
-             >
-                <div className="bg-tg-secondaryBg p-5 rounded-2xl space-y-4 border border-tg-hint/10">
-                    <h3 className="text-lg font-bold text-center">{t('lobbySetup', lang)}</h3>
-                    
-                    <div className="space-y-2">
-                        <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('nickname', lang)}</label>
-                        <Input 
-                            value={nicknameInput}
-                            onChange={(e) => setNicknameInput(e.target.value)}
-                            placeholder={t('enterNickname', lang)}
-                            required
-                        />
-                    </div>
-
-                    <div className="space-y-2">
-                         <label className="text-xs text-tg-hint uppercase font-bold ml-1">Gemini API Key</label>
-                         <Input 
-                            name="gemini-api-key"
-                            autoComplete="current-password"
-                            value={apiKeyInput}
-                            onChange={(e) => setApiKeyInput(e.target.value)}
-                            placeholder="AI Studio Key"
-                            type="password"
-                            required
-                         />
-                         <p className="text-xs text-tg-hint leading-relaxed">
-                            {t('apiKeyHintPrefix', lang)}
-                            <a 
-                                href="https://aistudio.google.com/api-keys" 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="text-tg-link underline font-bold"
-                            >
-                                {t('apiKeyLink', lang)}
-                            </a>
-                         </p>
-                    </div>
-                </div>
-
-                <div className="flex gap-3">
-                    <Button type="button" variant="secondary" onClick={() => setHomeView('main')} className="w-1/3">
-                        {t('back', lang)}
-                    </Button>
-                    <Button type="submit" isLoading={loading} className="w-2/3">
-                        {t('continue', lang)}
-                    </Button>
-                </div>
-                {errorMsg && <p className="text-red-500 text-sm text-center">{errorMsg}</p>}
-             </form>
-        )}
-
-        {homeView === 'join' && (
-            <div className="w-full max-w-sm space-y-8 animate-fade-in">
-                <div className="bg-tg-secondaryBg p-5 rounded-2xl space-y-4 border border-tg-hint/10">
-                    <h3 className="text-lg font-bold text-center">{t('joinLobby', lang)}</h3>
-
-                    <div className="space-y-2">
-                        <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('nickname', lang)}</label>
-                        <Input 
-                            value={nicknameInput}
-                            onChange={(e) => setNicknameInput(e.target.value)}
-                            placeholder={t('enterNickname', lang)}
-                            required
-                        />
-                    </div>
-
-                    <div className="space-y-2 pt-2">
-                        <label className="text-xs text-tg-hint uppercase font-bold ml-1 text-center block">{t('enterCode', lang)}</label>
-                        <CodeInput 
-                            onComplete={(code) => handleJoinLobby(code)}
-                            hasError={!!errorMsg}
-                            disabled={loading || !nicknameInput.trim()}
-                        />
-                    </div>
-                </div>
-
-                <div className="flex gap-3">
-                    <Button type="button" variant="secondary" onClick={() => setHomeView('main')}>
-                        {t('back', lang)}
-                    </Button>
-                </div>
-                {errorMsg && <p className="text-red-500 text-sm text-center font-bold animate-pulse">{errorMsg}</p>}
+            {/* Join Lobby Code Input */}
+            <div className="space-y-2">
+                 <label className="text-xs text-tg-hint uppercase font-bold text-center block tracking-widest">{t('enterCode', lang)}</label>
+                 <CodeInput
+                    onComplete={(code) => handleJoinLobby(code)}
+                    hasError={!!errorMsg}
+                    disabled={loading}
+                 />
+                 {errorMsg && <p className="text-red-500 text-sm text-center font-bold animate-pulse mt-2">{errorMsg}</p>}
             </div>
-        )}
+        </div>
       </div>
     );
   }
 
   if (gameState.status === GameStatus.LOBBY_WAITING || gameState.status === GameStatus.LOBBY_SETUP) {
       return (
-          <div className="min-h-screen p-6 flex flex-col">
-              <Toast />
+          <div className="min-h-screen flex flex-col p-4 relative">
+              <Toast toast={toast} />
+              {showSettingsModal && (
+                  <SettingsModal
+                      settingsNick={settingsNick}
+                      setSettingsNick={setSettingsNick}
+                      settingsApiKey={settingsApiKey}
+                      setSettingsApiKey={setSettingsApiKey}
+                      saveSettings={saveSettings}
+                      setShowSettingsModal={setShowSettingsModal}
+                      lang={lang}
+                      user={user}
+                  />
+              )}
+
               <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-bold text-tg-hint">Lobby: <span className="text-tg-text font-mono">{gameState.lobbyCode}</span></h2>
-                  <span className="px-2 py-1 bg-green-900 text-green-200 text-xs rounded-full">
-                      {gameState.players.length} Players
-                  </span>
+                  <h2 className="text-xl font-bold">{t('lobbySetup', lang)}</h2>
+                  <div className="flex items-center gap-2">
+                       {/* Settings Button */}
+                       <button
+                         onClick={openSettings}
+                         className="p-2 rounded-full bg-tg-secondaryBg border border-tg-hint/20 text-tg-hint hover:text-tg-text transition-colors"
+                       >
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                             <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+                           </svg>
+                       </button>
+
+                       <div className="flex items-center gap-2 bg-tg-secondaryBg px-3 py-1 rounded-lg border border-tg-hint/20">
+                          <span className="text-xs text-tg-hint uppercase">{t('codeLabel', lang)}</span>
+                          <span className="text-xl font-mono font-bold tracking-widest select-all">{gameState.lobbyCode}</span>
+                       </div>
+                  </div>
               </div>
 
-              <div className="bg-tg-secondaryBg p-4 rounded-xl mb-6 space-y-4 border border-tg-hint/10">
-                  <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider">{t('settings', lang)}</h3>
-                  
-                  {/* Game Mode Selector */}
-                  <div className="mb-4">
-                      <div className="flex justify-between text-sm mb-2">
-                          <span>{t('gameMode', lang)}</span>
-                      </div>
-                      <div className="flex flex-col gap-2">
-                          {Object.values(GameMode).map((mode) => (
-                             <button
-                                key={mode}
-                                onClick={() => handleUpdateSettings('mode', mode)}
-                                disabled={!user?.isCaptain}
-                                className={`p-3 rounded-lg border transition-all text-left group
-                                    ${gameState.settings.mode === mode 
-                                        ? 'bg-tg-button text-white border-transparent' 
-                                        : 'bg-tg-bg text-tg-text border-tg-hint/10 hover:bg-tg-bg/80'
-                                    }
-                                    ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
-                                `}
-                             >
-                                 <div className="text-xs font-bold uppercase mb-1">
-                                     {mode === GameMode.COOP && t('coop', lang)}
-                                     {mode === GameMode.PVP && t('pvp', lang)}
-                                     {mode === GameMode.BATTLE_ROYALE && t('battleRoyale', lang)}
-                                 </div>
-                                 <div className={`text-[10px] leading-relaxed ${gameState.settings.mode === mode ? 'text-white/80' : 'text-tg-hint'}`}>
-                                     {mode === GameMode.COOP && t('coopDesc', lang)}
-                                     {mode === GameMode.PVP && t('pvpDesc', lang)}
-                                     {mode === GameMode.BATTLE_ROYALE && t('battleRoyaleDesc', lang)}
-                                 </div>
-                             </button>
-                          ))}
-                      </div>
+              {/* API Key Warning for Captain */}
+              {user?.isCaptain && (!gameState.settings.apiKey || gameState.settings.apiKey.length < 10) && (
+                  <div className="bg-red-500/10 border border-red-500/50 p-3 rounded-xl mb-4 text-center animate-pulse">
+                      <p className="text-red-500 text-xs font-bold">{t('missingApiKey', lang)}</p>
+                      <p className="text-tg-hint text-[10px]">{t('missingApiKeyDesc', lang)}</p>
+                  </div>
+              )}
+
+              <div className="bg-tg-secondaryBg p-5 rounded-2xl border border-tg-hint/10 space-y-4 mb-4">
+                  <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">{t('gameSettings', lang)}</h3>
+
+                  {/* Scenario Type Selection */}
+                  <div
+                    className="flex overflow-x-auto space-x-3 pb-2 scrollbar-hide cursor-grab active:cursor-grabbing"
+                    ref={scrollContainerRef}
+                    onMouseDown={handleMouseDown}
+                    onMouseLeave={handleMouseLeave}
+                    onMouseUp={handleMouseUp}
+                    onMouseMove={handleMouseMove}
+                  >
+                      {Object.values(ScenarioType).map(type => (
+                          <button
+                            key={type}
+                            onClick={() => handleUpdateSettings('scenarioType', type)}
+                            disabled={!user?.isCaptain}
+                            className={`flex-shrink-0 px-4 py-2 rounded-xl border transition-all ${gameState.settings.scenarioType === type
+                                ? 'bg-tg-button text-white border-transparent shadow-lg scale-105'
+                                : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'}`}
+                          >
+                              {type.replace(/_/g, ' ').toUpperCase()}
+                          </button>
+                      ))}
                   </div>
 
-                  {/* Scenario Type Selector (Wrapped Grid) */}
-                  <div className="mb-4">
-                      <div className="flex justify-between text-sm mb-2">
-                          <span>{t('scenarioType', lang)}</span>
-                      </div>
-                      <div className="flex flex-wrap gap-2 justify-center">
-                          {Object.values(ScenarioType).map((type) => (
-                             <button
-                                key={type}
-                                onClick={() => handleUpdateSettings('scenarioType', type)}
-                                disabled={!user?.isCaptain}
-                                className={`px-4 py-2 text-xs font-bold uppercase rounded-full border transition-all
-                                    ${gameState.settings.scenarioType === type 
-                                        ? 'bg-tg-button text-white border-transparent' 
-                                        : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
-                                    }
-                                    ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
-                                `}
-                             >
-                                 {type === ScenarioType.ANY && t('any', lang)}
-                                 {type === ScenarioType.SCI_FI && t('scifi', lang)}
-                                 {type === ScenarioType.SUPERNATURAL && t('supernatural', lang)}
-                                 {type === ScenarioType.APOCALYPSE && t('apocalypse', lang)}
-                                 {type === ScenarioType.FANTASY && t('fantasy', lang)}
-                                 {type === ScenarioType.CYBERPUNK && t('cyberpunk', lang)}
-                                 {type === ScenarioType.BACKROOMS && t('backrooms', lang)}
-                                 {type === ScenarioType.SCP && t('scp', lang)}
-                                 {type === ScenarioType.MINECRAFT && t('minecraft', lang)}
-                                 {type === ScenarioType.HARRY_POTTER && t('harryPotter', lang)}
-                             </button>
-                          ))}
-                      </div>
+                  {/* Mode Selection */}
+                  <div className="grid grid-cols-3 gap-2">
+                      {Object.values(GameMode).map(mode => (
+                          <button
+                            key={mode}
+                            onClick={() => handleUpdateSettings('mode', mode)}
+                            disabled={!user?.isCaptain}
+                            className={`py-2 text-xs font-bold uppercase rounded-lg border transition-all ${gameState.settings.mode === mode
+                                ? 'bg-tg-button text-white border-transparent'
+                                : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'}`}
+                          >
+                              {mode === GameMode.BATTLE_ROYALE ? 'ROYALE' : mode}
+                          </button>
+                      ))}
                   </div>
 
-                  {/* Image Generation Mode */}
+                  {/* Language Selection */}
                   <div>
                       <div className="flex justify-between text-sm mb-2">
-                          <span>{t('imageGenerationMode', lang)}</span>
-                      </div>
-                      <div className="flex bg-tg-bg p-1 rounded-lg">
-                          {(Object.values(ImageGenerationMode) as ImageGenerationMode[]).map((mode) => (
-                             <button
-                                key={mode}
-                                onClick={() => handleUpdateSettings('imageGenerationMode', mode)}
-                                disabled={!user?.isCaptain}
-                                className={`flex-1 py-2 text-[10px] font-bold uppercase rounded-lg transition-all flex flex-col items-center justify-center gap-1
-                                    ${gameState.settings.imageGenerationMode === mode
-                                        ? 'bg-tg-button text-white'
-                                        : 'text-tg-hint opacity-70 hover:bg-tg-bg/80'
-                                    }
-                                    ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
-                                `}
-                             >
-                                 <span>
-                                     {mode === ImageGenerationMode.NONE && t('imgNone', lang)}
-                                     {mode === ImageGenerationMode.SCENARIO && t('imgScenario', lang)}
-                                     {mode === ImageGenerationMode.FULL && t('imgFull', lang)}
-                                 </span>
-                             </button>
-                          ))}
-                      </div>
-                  </div>
-
-                  {/* Time Limit */}
-                  <div>
-                      <div className="flex justify-between text-sm mb-1">
-                          <span>{t('timeLimit', lang)}</span>
-                          <span className="font-mono text-tg-button">{gameState.settings.timeLimitSeconds} {t('seconds', lang)}</span>
-                      </div>
-                      <input 
-                          type="range" 
-                          min={MIN_TIME} max={MAX_TIME} step={10}
-                          value={gameState.settings.timeLimitSeconds}
-                          onChange={(e) => handleUpdateSettings('timeLimitSeconds', Number(e.target.value))}
-                          disabled={!user?.isCaptain}
-                          className={`w-full h-2 bg-tg-bg rounded-lg appearance-none cursor-pointer ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      />
-                  </div>
-
-                  {/* Char Limit */}
-                  <div>
-                      <div className="flex justify-between text-sm mb-1">
-                          <span>{t('charLimit', lang)}</span>
-                          <span className="font-mono text-tg-button">{gameState.settings.charLimit} {t('chars', lang)}</span>
-                      </div>
-                       <input 
-                          type="range" 
-                          min={MIN_CHARS} max={MAX_CHARS} step={100}
-                          value={gameState.settings.charLimit}
-                          onChange={(e) => handleUpdateSettings('charLimit', Number(e.target.value))}
-                          disabled={!user?.isCaptain}
-                          className={`w-full h-2 bg-tg-bg rounded-lg appearance-none cursor-pointer ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      />
-                  </div>
-
-                  {/* Story Language */}
-                  <div className={`transition-all duration-300 ${!gameState.settings.storyLanguage && user?.isCaptain ? 'p-2 rounded-lg border-2 border-red-500/50 bg-red-500/10' : ''}`}>
-                      <div className="flex justify-between text-sm mb-2 items-center">
                           <span>{t('storyLanguage', lang)}</span>
-                          {!gameState.settings.storyLanguage && user?.isCaptain && (
-                              <span className="text-red-500 text-xs font-bold animate-pulse">Required *</span>
-                          )}
                       </div>
-                      <div className="flex bg-tg-bg p-1 rounded-lg">
+                      <div className="flex gap-2 p-1 bg-tg-bg rounded-lg">
                           <button 
                             onClick={() => handleUpdateSettings('storyLanguage', 'en')}
                             disabled={!user?.isCaptain}
@@ -703,7 +647,7 @@ const App: React.FC = () => {
                   </div>
               </div>
 
-              <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">Players</h3>
+              <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">{t('players', lang)}</h3>
               <div className="flex-grow space-y-2 overflow-y-auto">
                   {gameState.players.map(p => (
                       <div key={p.id} className={`flex items-center p-3 bg-tg-secondaryBg rounded-lg ${!p.isOnline ? 'opacity-50' : ''}`}>
@@ -717,7 +661,11 @@ const App: React.FC = () => {
 
               <div className="space-y-3 mt-6">
                  {user?.isCaptain ? (
-                     <Button onClick={handleStartGame} disabled={gameState.players.length < 2}>
+                     <Button
+                        onClick={handleStartGame}
+                        disabled={gameState.players.length < 2 || !gameState.settings.apiKey || gameState.settings.apiKey.length < 10}
+                        className={(!gameState.settings.apiKey || gameState.settings.apiKey.length < 10) ? 'opacity-50' : ''}
+                     >
                         {t('startGame', lang)}
                      </Button>
                  ) : (
@@ -736,7 +684,7 @@ const App: React.FC = () => {
           <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center space-y-6">
               <div className="w-16 h-16 border-4 border-tg-button border-t-transparent rounded-full animate-spin"></div>
               <h2 className="text-2xl font-bold animate-pulse">{t('generatingScenario', lang)}</h2>
-              <p className="text-tg-hint text-sm">Gemini 3 Pro is thinking...</p>
+              <p className="text-tg-hint text-sm">{t('geminiThinking', lang)}</p>
           </div>
       );
   }
@@ -745,7 +693,7 @@ const App: React.FC = () => {
       return (
           <div className="min-h-screen flex flex-col p-4">
               <div className="flex justify-between items-center mb-4 bg-tg-secondaryBg p-3 rounded-lg sticky top-0 z-10 shadow-lg">
-                  <span className="text-sm font-bold text-red-400">Time Left</span>
+                  <span className="text-sm font-bold text-red-400">{t('timeLeft', lang)}</span>
                   <span className="text-2xl font-mono font-bold text-red-500">{timeLeftDisplay}s</span>
               </div>
 
@@ -755,7 +703,7 @@ const App: React.FC = () => {
                           <img src={gameState.scenarioImage} alt="Scenario" className="w-full h-auto object-cover" />
                       </div>
                   )}
-                  <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">The Situation</h3>
+                  <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">{t('situation', lang)}</h3>
                   <MarkdownDisplay content={gameState.scenario || ''} />
               </div>
 
@@ -765,7 +713,7 @@ const App: React.FC = () => {
                     className="w-full flex-grow bg-tg-secondaryBg p-4 rounded-xl border border-tg-hint/20 focus:border-tg-button focus:outline-none resize-none"
                     placeholder={t('placeholderAction', lang)}
                     value={actionInput}
-                    onChange={(e) => setActionInput(e.target.value)}
+                    onChange={(e) => handleActionInputChange(e.target.value)}
                     disabled={user?.status === 'ready'}
                     maxLength={gameState.settings.charLimit}
                   />
@@ -777,10 +725,10 @@ const App: React.FC = () => {
 
               <div className="mt-4 pb-4">
                   {user?.status === 'ready' ? (
-                      <Button disabled className="bg-green-600 text-white">Action Submitted</Button>
+                      <Button disabled className="bg-green-600 text-white">{t('actionSubmitted', lang)}</Button>
                   ) : (
                       <Button onClick={() => handleSubmitAction(false)} isLoading={loading}>
-                          Submit
+                          {t('submit', lang)}
                       </Button>
                   )}
               </div>
@@ -797,7 +745,7 @@ const App: React.FC = () => {
                 <div className="w-4 h-4 bg-tg-button rounded-full animate-bounce delay-200"></div>
             </div>
             <h2 className="text-2xl font-bold">{t('judging', lang)}</h2>
-            <p className="text-tg-hint">Analyzing survival probabilities...</p>
+            <p className="text-tg-hint">{t('analyzing', lang)}</p>
         </div>
      );
   }
@@ -805,7 +753,7 @@ const App: React.FC = () => {
   if (gameState.status === GameStatus.RESULTS && gameState.roundResult) {
       return (
           <div className="min-h-screen flex flex-col p-4">
-              <h2 className="text-3xl font-black mb-6 text-center">RESULTS</h2>
+              <h2 className="text-3xl font-black mb-6 text-center">{t('results', lang)}</h2>
               
               {gameState.roundResult?.image && (
                   <div className="mb-6 rounded-2xl overflow-hidden shadow-2xl border border-tg-hint/20">
@@ -818,7 +766,7 @@ const App: React.FC = () => {
               </div>
 
               <div className="space-y-3 mb-8">
-                  <h3 className="text-sm font-bold text-tg-hint uppercase">Status Report</h3>
+                  <h3 className="text-sm font-bold text-tg-hint uppercase">{t('statusReport', lang)}</h3>
                   {gameState.players.map(p => {
                       const deathInfo = gameState.roundResult!.deaths.find(d => d.playerId === p.id);
                       return (
@@ -839,7 +787,7 @@ const App: React.FC = () => {
       );
   }
 
-  return <div className="p-10 text-center">Loading...</div>;
+  return <div className="p-10 text-center">{t('loading', lang)}</div>;
 };
 
 export default App;
