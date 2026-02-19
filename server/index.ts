@@ -135,6 +135,12 @@ io.on('connection', (socket) => {
       lobbyService.submitAction(code, user.id.toString(), action);
   });
 
+  socket.on('reveal_results', ({ code }: { code: string }) => {
+      if (lobbyService.isCaptain(code, user.id.toString())) {
+          lobbyService.revealResults(code, user.id.toString());
+      }
+  });
+
   socket.on('reset_game', ({ code }: { code: string }) => {
       if (lobbyService.isCaptain(code, user.id.toString())) {
           lobbyService.resetGame(code, user.id.toString());
