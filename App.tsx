@@ -120,7 +120,8 @@ const App: React.FC = () => {
     players: [],
     status: GameStatus.HOME,
     settings: initialSettings,
-    scenario: null
+    scenario: null,
+    resultsRevealed: false
   });
 
   // UI State
@@ -147,11 +148,21 @@ const App: React.FC = () => {
   const startX = useRef(0);
   const scrollLeftRef = useRef(0);
 
+  // Text Reveal State
+  const [displayedText, setDisplayedText] = useState('');
+  const [textRevealed, setTextRevealed] = useState(false);
+  const [revealSpeedMultiplier, setRevealSpeedMultiplier] = useState(1);
+  const tapCountRef = useRef(0);
+
   // Helper for Haptics to avoid v6.0 crash
-  const triggerHaptic = (type: 'error' | 'success' | 'warning') => {
+  const triggerHaptic = (type: 'error' | 'success' | 'warning' | 'medium') => {
     const tg = window.Telegram.WebApp;
     if (tg.isVersionAtLeast && tg.isVersionAtLeast('6.1')) {
-      tg.HapticFeedback.notificationOccurred(type);
+       if (type === 'medium') {
+           tg.HapticFeedback.impactOccurred('medium');
+       } else {
+           tg.HapticFeedback.notificationOccurred(type);
+       }
     }
   };
 
@@ -249,7 +260,67 @@ const App: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Reset text reveal on new round/state change
+  useEffect(() => {
+     if (gameState.status !== GameStatus.RESULTS) {
+         setDisplayedText('');
+         setTextRevealed(false);
+         setRevealSpeedMultiplier(1);
+         tapCountRef.current = 0;
+     }
+  }, [gameState.status]);
+
+  // Force reveal if server says so
+  useEffect(() => {
+      if (gameState.status === GameStatus.RESULTS && gameState.resultsRevealed && gameState.roundResult) {
+          if (!textRevealed) {
+              setDisplayedText(gameState.roundResult.story);
+              setTextRevealed(true);
+          }
+      }
+  }, [gameState.status, gameState.resultsRevealed, gameState.roundResult, textRevealed]);
+
+  // Typewriter Effect
+  useEffect(() => {
+      if (gameState.status === GameStatus.RESULTS && gameState.roundResult) {
+          const fullText = gameState.roundResult.story;
+
+          if (textRevealed || displayedText.length >= fullText.length) {
+              if (!textRevealed) setTextRevealed(true);
+              return;
+          }
+
+          // Don't run effect if already revealed by server (handled by other effect)
+          if (gameState.resultsRevealed) return;
+
+          const baseSpeed = 30; // ms per char
+          const currentSpeed = baseSpeed / revealSpeedMultiplier;
+
+          const timer = setTimeout(() => {
+              setDisplayedText(fullText.slice(0, displayedText.length + 1));
+          }, currentSpeed);
+
+          return () => clearTimeout(timer);
+      }
+  }, [gameState.status, gameState.roundResult, displayedText, textRevealed, revealSpeedMultiplier, gameState.resultsRevealed]);
+
+
   // -- Handlers --
+
+  const handleResultsTap = () => {
+      if (textRevealed || gameState.resultsRevealed) return;
+
+      tapCountRef.current += 1;
+      if (tapCountRef.current % 3 === 0) {
+          setRevealSpeedMultiplier(prev => prev * 1.5);
+          triggerHaptic('medium');
+      }
+  };
+
+  const handleRevealResults = () => {
+      if (!gameState.lobbyCode) return;
+      SocketService.revealResults(gameState.lobbyCode);
+  };
 
   // DRAG SCROLL HANDLERS (Mouse Drag Logic)
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -761,28 +832,49 @@ const App: React.FC = () => {
                   </div>
               )}
 
-              <div className="bg-tg-secondaryBg p-5 rounded-2xl mb-6 shadow-lg border border-tg-hint/10">
-                  <MarkdownDisplay content={gameState.roundResult.story} />
+              <div
+                  className="bg-tg-secondaryBg p-5 rounded-2xl mb-6 shadow-lg border border-tg-hint/10 min-h-[200px]"
+                  onClick={handleResultsTap}
+              >
+                  <MarkdownDisplay content={displayedText} />
+                  {!textRevealed && !gameState.resultsRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
               </div>
 
-              <div className="space-y-3 mb-8">
-                  <h3 className="text-sm font-bold text-tg-hint uppercase">{t('statusReport', lang)}</h3>
-                  {gameState.players.map(p => {
-                      const deathInfo = gameState.roundResult!.deaths.find(d => d.playerId === p.id);
-                      return (
-                          <div key={p.id} className={`flex items-center justify-between p-3 rounded-lg border ${deathInfo ? 'border-red-900 bg-red-900/10' : 'border-green-900 bg-green-900/10'}`}>
-                              <span className="font-bold">{p.name}</span>
-                              <span className={`text-xs font-bold px-2 py-1 rounded ${deathInfo ? 'bg-red-600 text-white' : 'bg-green-600 text-white'}`}>
-                                  {deathInfo ? (deathInfo.reason || t('died', lang)) : t('survived', lang)}
-                              </span>
-                          </div>
-                      );
-                  })}
-              </div>
+               {/* Captain Show Button */}
+               {user?.isCaptain && textRevealed && !gameState.resultsRevealed && (
+                   <div className="mb-6 animate-fade-in">
+                       <Button onClick={handleRevealResults} className="bg-yellow-600 text-white animate-pulse">
+                           SHOW RESULTS
+                       </Button>
+                   </div>
+               )}
 
-              <Button onClick={handleRestart} className="mt-auto mb-6">
-                  {t('playAgain', lang)}
-              </Button>
+              {gameState.resultsRevealed && (
+                  <div className="space-y-3 mb-8 animate-fade-in">
+                      <h3 className="text-sm font-bold text-tg-hint uppercase">{t('statusReport', lang)}</h3>
+                      {gameState.players.map((p, index) => {
+                          const deathInfo = gameState.roundResult!.deaths.find(d => d.playerId === p.id);
+                          return (
+                              <div
+                                key={p.id}
+                                className={`flex items-center justify-between p-3 rounded-lg border animate-slide-up ${deathInfo ? 'border-red-900 bg-red-900/10' : 'border-green-900 bg-green-900/10'}`}
+                                style={{ animationDelay: `${index * 100}ms` }}
+                              >
+                                  <span className="font-bold">{p.name}</span>
+                                  <span className={`text-xs font-bold px-2 py-1 rounded ${deathInfo ? 'bg-red-600 text-white' : 'bg-green-600 text-white'}`}>
+                                      {deathInfo ? (deathInfo.reason || t('died', lang)) : t('survived', lang)}
+                                  </span>
+                              </div>
+                          );
+                      })}
+                  </div>
+              )}
+
+              {gameState.resultsRevealed && (
+                <Button onClick={handleRestart} className="mt-auto mb-6">
+                    {t('playAgain', lang)}
+                </Button>
+              )}
           </div>
       );
   }

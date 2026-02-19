@@ -67,6 +67,7 @@ export interface ServerGameState {
   scenario: ScenarioResponse | null; // Full object with secrets
   scenarioImage?: string;
   roundResult?: RoundResult;
+  resultsRevealed: boolean;
 }
 
 // Client-Side State (Safe)
@@ -78,6 +79,7 @@ export interface GameState {
   scenario: string | null; // Just the text!
   scenarioImage?: string;
   roundResult?: RoundResult;
+  resultsRevealed: boolean;
 }
 
 export interface RoundResult {

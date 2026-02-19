@@ -138,6 +138,10 @@ class SocketServiceImpl {
       this.socket?.emit('submit_action', { code, action });
   }
 
+  public revealResults(code: string) {
+      this.socket?.emit('reveal_results', { code });
+  }
+
   public resetGame(code: string) {
       this.socket?.emit('reset_game', { code });
   }
