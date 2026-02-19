@@ -11,9 +11,18 @@ import { MarkdownDisplay } from './components/MarkdownDisplay';
 // Storage Keys
 const STORAGE_KEYS = {
     API_KEY: 'against_ai_api_key',
+    NAVY_KEY: 'against_ai_navy_key',
     NICKNAME: 'against_ai_nickname',
     SETTINGS: 'against_ai_lobby_settings',
     LANG: 'against_ai_ui_lang'
+};
+
+// Helper to count keys
+const getKeyCount = (): number => {
+    let count = 0;
+    if (localStorage.getItem(STORAGE_KEYS.API_KEY)) count++;
+    if (localStorage.getItem(STORAGE_KEYS.NAVY_KEY)) count++;
+    return count;
 };
 
 // Extracted Components
@@ -34,6 +43,8 @@ interface SettingsModalProps {
     setSettingsNick: (val: string) => void;
     settingsApiKey: string;
     setSettingsApiKey: (val: string) => void;
+    settingsNavyApiKey: string;
+    setSettingsNavyApiKey: (val: string) => void;
     saveSettings: () => void;
     setShowSettingsModal: (val: boolean) => void;
     lang: Language;
@@ -42,6 +53,7 @@ interface SettingsModalProps {
 
 const SettingsModal: React.FC<SettingsModalProps> = ({
     settingsNick, setSettingsNick, settingsApiKey, setSettingsApiKey,
+    settingsNavyApiKey, setSettingsNavyApiKey,
     saveSettings, setShowSettingsModal, lang, user
 }) => (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
@@ -57,21 +69,33 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 />
             </div>
 
-            {user?.isCaptain && (
-                <div className="space-y-2">
-                     <label className="text-xs text-tg-hint uppercase font-bold ml-1">Gemini API Key</label>
-                     <Input
-                        value={settingsApiKey}
-                        onChange={(e) => setSettingsApiKey(e.target.value)}
-                        placeholder="AI Studio Key"
-                        type="password"
-                        autoComplete="off"
-                     />
-                     <p className="text-[10px] text-tg-hint">
-                        {t('apiKeyHintPrefix', lang)} <a href="https://aistudio.google.com/api-keys" target="_blank" className="underline text-tg-link">{t('apiKeyLink', lang)}</a>.
-                     </p>
-                </div>
-            )}
+            <div className="space-y-2">
+                 <label className="text-xs text-tg-hint uppercase font-bold ml-1">Gemini API Key (Required)</label>
+                 <Input
+                    value={settingsApiKey}
+                    onChange={(e) => setSettingsApiKey(e.target.value)}
+                    placeholder="AI Studio Key"
+                    type="password"
+                    autoComplete="off"
+                 />
+                 <p className="text-[10px] text-tg-hint">
+                    {t('apiKeyHintPrefix', lang)} <a href="https://aistudio.google.com/api-keys" target="_blank" className="underline text-tg-link">{t('apiKeyLink', lang)}</a>.
+                 </p>
+            </div>
+
+            <div className="space-y-2">
+                 <label className="text-xs text-tg-hint uppercase font-bold ml-1">API.NAVY Key (Optional)</label>
+                 <Input
+                    value={settingsNavyApiKey}
+                    onChange={(e) => setSettingsNavyApiKey(e.target.value)}
+                    placeholder="Navy Key"
+                    type="password"
+                    autoComplete="off"
+                 />
+                 <p className="text-[10px] text-tg-hint">
+                    Get free key at <a href="https://api.navy" target="_blank" className="underline text-tg-link">api.navy</a>.
+                 </p>
+            </div>
 
             <div className="flex gap-3 pt-2">
                 <Button variant="secondary" onClick={() => setShowSettingsModal(false)}>
@@ -132,6 +156,7 @@ const App: React.FC = () => {
   // Settings Modal State
   const [settingsNick, setSettingsNick] = useState('');
   const [settingsApiKey, setSettingsApiKey] = useState('');
+  const [settingsNavyApiKey, setSettingsNavyApiKey] = useState('');
   
   // Toast State
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
@@ -200,6 +225,7 @@ const App: React.FC = () => {
     
     // Load persisted inputs
     const storedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME) || tgFirstName;
+    const initialKeyCount = getKeyCount();
 
     // Default User State
     const playerObj: Player = {
@@ -207,7 +233,8 @@ const App: React.FC = () => {
       name: storedNick,
       isCaptain: false,
       status: 'waiting',
-      isOnline: true
+      isOnline: true,
+      keyCount: initialKeyCount
     };
     setUser(playerObj);
 
@@ -282,18 +309,17 @@ const App: React.FC = () => {
 
     setLoading(true);
 
-    // Use stored key or empty
-    const cleanKey = localStorage.getItem(STORAGE_KEYS.API_KEY) || '';
+    const currentKeyCount = getKeyCount();
 
-    // Use current persisted settings + new API Key
+    // Use current persisted settings
     const lobbySettings: LobbySettings = { 
-      ...gameState.settings, // Use current state settings (which were loaded from LS)
-      apiKey: cleanKey 
+      ...gameState.settings
+      // apiKey removed
     };
 
     try {
         // Skip validation for instant creation
-        const newUser = { ...user, isCaptain: true };
+        const newUser = { ...user, isCaptain: true, keyCount: currentKeyCount };
         await SocketService.createLobby(newUser, lobbySettings);
         // Only update user state on success
         setUser(newUser);
@@ -309,7 +335,9 @@ const App: React.FC = () => {
     
     // Ensure name is consistent
     const storedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME) || playerObj.name;
-    const updatedPlayerObj = { ...playerObj, name: storedNick };
+    const currentKeyCount = getKeyCount();
+
+    const updatedPlayerObj = { ...playerObj, name: storedNick, keyCount: currentKeyCount };
     setUser(updatedPlayerObj);
 
     setErrorMsg('');
@@ -358,8 +386,9 @@ const App: React.FC = () => {
     if (!gameState.lobbyCode) return;
 
     // Client-side check for API Key before start (for Captain)
-    if (user?.isCaptain && (!gameState.settings.apiKey || gameState.settings.apiKey.length < 10)) {
-        setToast({ msg: "Please set a valid API Key in Settings first!", type: 'error' });
+    // Check local storage
+    if (user?.isCaptain && !localStorage.getItem(STORAGE_KEYS.API_KEY)) {
+        setToast({ msg: "Please set a valid Gemini API Key in Settings first!", type: 'error' });
         triggerHaptic('error');
         return;
     }
@@ -426,13 +455,15 @@ const App: React.FC = () => {
   // Settings Modal Handlers
   const openSettings = () => {
       setSettingsNick(user?.name || '');
-      setSettingsApiKey(gameState.settings.apiKey || '');
+      setSettingsApiKey(localStorage.getItem(STORAGE_KEYS.API_KEY) || '');
+      setSettingsNavyApiKey(localStorage.getItem(STORAGE_KEYS.NAVY_KEY) || '');
       setShowSettingsModal(true);
   };
 
   const saveSettings = () => {
       const cleanNick = settingsNick.trim();
       const cleanKey = settingsApiKey.trim();
+      const cleanNavyKey = settingsNavyApiKey.trim();
 
       if (!cleanNick) {
           setToast({ msg: t('nicknameRequired', lang), type: 'error' });
@@ -441,17 +472,23 @@ const App: React.FC = () => {
 
       // 1. Save Nickname
       localStorage.setItem(STORAGE_KEYS.NICKNAME, cleanNick);
-      if (user && gameState.lobbyCode) {
-          SocketService.updatePlayer(gameState.lobbyCode, { name: cleanNick });
-          setUser({ ...user, name: cleanNick });
-      }
 
-      // 2. Save API Key (Captain only)
-      if (user?.isCaptain) {
-          localStorage.setItem(STORAGE_KEYS.API_KEY, cleanKey);
-          if (gameState.lobbyCode) {
-               SocketService.updateSettings(gameState.lobbyCode, { apiKey: cleanKey });
-          }
+      // 2. Save API Keys
+      if (cleanKey) localStorage.setItem(STORAGE_KEYS.API_KEY, cleanKey);
+      else localStorage.removeItem(STORAGE_KEYS.API_KEY);
+
+      if (cleanNavyKey) localStorage.setItem(STORAGE_KEYS.NAVY_KEY, cleanNavyKey);
+      else localStorage.removeItem(STORAGE_KEYS.NAVY_KEY);
+
+      const newKeyCount = getKeyCount();
+
+      // 3. Update Player State on Server
+      if (user && gameState.lobbyCode) {
+          SocketService.updatePlayer(gameState.lobbyCode, {
+              name: cleanNick,
+              keyCount: newKeyCount
+          });
+          setUser({ ...user, name: cleanNick, keyCount: newKeyCount });
       }
 
       setShowSettingsModal(false);
@@ -516,6 +553,8 @@ const App: React.FC = () => {
                       setSettingsNick={setSettingsNick}
                       settingsApiKey={settingsApiKey}
                       setSettingsApiKey={setSettingsApiKey}
+                      settingsNavyApiKey={settingsNavyApiKey}
+                      setSettingsNavyApiKey={setSettingsNavyApiKey}
                       saveSettings={saveSettings}
                       setShowSettingsModal={setShowSettingsModal}
                       lang={lang}
@@ -544,7 +583,7 @@ const App: React.FC = () => {
               </div>
 
               {/* API Key Warning for Captain */}
-              {user?.isCaptain && (!gameState.settings.apiKey || gameState.settings.apiKey.length < 10) && (
+              {user?.isCaptain && !localStorage.getItem(STORAGE_KEYS.API_KEY) && (
                   <div className="bg-red-500/10 border border-red-500/50 p-3 rounded-xl mb-4 text-center animate-pulse">
                       <p className="text-red-500 text-xs font-bold">{t('missingApiKey', lang)}</p>
                       <p className="text-tg-hint text-[10px]">{t('missingApiKeyDesc', lang)}</p>
@@ -653,6 +692,11 @@ const App: React.FC = () => {
                       <div key={p.id} className={`flex items-center p-3 bg-tg-secondaryBg rounded-lg ${!p.isOnline ? 'opacity-50' : ''}`}>
                           <div className={`w-3 h-3 rounded-full mr-3 ${p.status === 'ready' ? 'bg-green-500' : 'bg-gray-500'}`} />
                           <span className="font-medium">{p.name}</span>
+                          {/* API Key Indicators */}
+                          <div className="ml-2 flex gap-1">
+                              {p.keyCount && p.keyCount >= 1 ? <span className="text-green-500 text-xs">✓</span> : null}
+                              {p.keyCount && p.keyCount >= 2 ? <span className="text-green-500 text-xs">✓</span> : null}
+                          </div>
                           {!p.isOnline && <span className="ml-2 text-xs text-red-500 font-bold">[OFFLINE]</span>}
                           {p.isCaptain && <span className="ml-auto text-xs text-yellow-500">👑 Captain</span>}
                       </div>
@@ -663,8 +707,8 @@ const App: React.FC = () => {
                  {user?.isCaptain ? (
                      <Button
                         onClick={handleStartGame}
-                        disabled={gameState.players.length < 2 || !gameState.settings.apiKey || gameState.settings.apiKey.length < 10}
-                        className={(!gameState.settings.apiKey || gameState.settings.apiKey.length < 10) ? 'opacity-50' : ''}
+                        disabled={gameState.players.length < 2 || !localStorage.getItem(STORAGE_KEYS.API_KEY)}
+                        className={!localStorage.getItem(STORAGE_KEYS.API_KEY) ? 'opacity-50' : ''}
                      >
                         {t('startGame', lang)}
                      </Button>

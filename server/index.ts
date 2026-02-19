@@ -125,6 +125,12 @@ io.on('connection', (socket) => {
       lobbyService.updatePlayer(code, user.id.toString(), updates);
   });
 
+  // Handle client responding to 'request_keys' event
+  socket.on('provide_keys', ({ code, keys }: { code: string, keys: { gemini?: string, navy?: string } }) => {
+      // Validate user identity using socket.telegramUser.id
+      lobbyService.receiveKeys(code, user.id.toString(), keys);
+  });
+
   socket.on('start_game', ({ code }: { code: string }) => {
       if (lobbyService.isCaptain(code, user.id.toString())) {
           lobbyService.startGame(code, user.id.toString());

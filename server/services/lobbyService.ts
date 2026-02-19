@@ -3,6 +3,7 @@ import { GameState, ServerGameState, GameStatus, LobbySettings, Player, RoundRes
 import { GeminiService } from './geminiService';
 import { CONFIG } from '../config';
 import { saveImage } from '../utils/imageStorage';
+import { KeyManager } from '../utils/keyManager';
 
 const LOBBY_CODE_LENGTH = 6;
 const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -11,6 +12,7 @@ export class LobbyService {
   private lobbies: Map<string, ServerGameState> = new Map();
   private timers: Map<string, NodeJS.Timeout> = new Map();
   private playerSockets: Map<string, Set<string>> = new Map();
+  private keyCollectors: Map<string, Map<string, { gemini?: string, navy?: string }>> = new Map();
   private io: SocketIOServer;
 
   constructor(io: SocketIOServer) {
@@ -37,10 +39,12 @@ export class LobbyService {
     const code = this.generateCode();
     const initialState: ServerGameState = {
       lobbyCode: code,
-      players: [{ ...host, isCaptain: true, status: 'waiting', isOnline: true }],
+      players: [{ ...host, isCaptain: true, status: 'waiting', isOnline: true, keyCount: host.keyCount || 0 }],
       status: GameStatus.LOBBY_WAITING,
       settings: settings,
-      scenario: null
+      scenario: null,
+      geminiKeys: [],
+      navyKeys: []
     };
 
     this.lobbies.set(code, initialState);
@@ -57,13 +61,14 @@ export class LobbyService {
         lobby.players[existingIndex] = {
             ...lobby.players[existingIndex],
             name: player.name,
-            isOnline: true
+            isOnline: true,
+            keyCount: player.keyCount // update key count if re-joining
         };
     } else {
         if (lobby.status !== GameStatus.LOBBY_WAITING && lobby.status !== GameStatus.LOBBY_SETUP) {
             return false;
         }
-        lobby.players.push({ ...player, isCaptain: false, status: 'waiting', isOnline: true });
+        lobby.players.push({ ...player, isCaptain: false, status: 'waiting', isOnline: true, keyCount: player.keyCount || 0 });
     }
 
     if (!this.playerSockets.has(player.id)) {
@@ -111,9 +116,13 @@ export class LobbyService {
     const player = lobby.players.find(p => p.id === playerId);
     if (player) {
         let changed = false;
-        // Only allow updating specific fields for now (security)
+        // Only allow updating specific fields for now
         if (updates.name && updates.name.trim() !== '' && updates.name !== player.name) {
              player.name = updates.name.substring(0, 20); // Limit length
+             changed = true;
+        }
+        if (updates.keyCount !== undefined && updates.keyCount !== player.keyCount) {
+             player.keyCount = updates.keyCount;
              changed = true;
         }
 
@@ -123,24 +132,88 @@ export class LobbyService {
     }
   }
 
+  /**
+   * Called by socket handler when client responds to request_keys
+   */
+  public receiveKeys(code: string, playerId: string, keys: { gemini?: string, navy?: string }) {
+      const collector = this.keyCollectors.get(code);
+      if (collector) {
+          collector.set(playerId, keys);
+      }
+  }
+
+  private async collectKeys(code: string): Promise<void> {
+      const lobby = this.lobbies.get(code);
+      if (!lobby) return;
+
+      // Initialize collector for this session
+      this.keyCollectors.set(code, new Map());
+
+      // Request keys from all clients
+      this.io.to(code).emit('request_keys');
+
+      // Wait for 3 seconds to collect keys
+      // Ideally we would wait for all connected players, but a timeout is safer against laggy clients
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      const collectedMap = this.keyCollectors.get(code);
+      this.keyCollectors.delete(code);
+
+      if (!collectedMap) return;
+
+      const geminiKeys: string[] = [];
+      const navyKeys: string[] = [];
+
+      // Process keys: Captain first!
+      const captain = lobby.players.find(p => p.isCaptain);
+      if (captain) {
+          const capKeys = collectedMap.get(captain.id);
+          if (capKeys) {
+              if (capKeys.gemini) geminiKeys.push(capKeys.gemini);
+              if (capKeys.navy) navyKeys.push(capKeys.navy);
+          }
+      }
+
+      // Then everyone else (randomized or existing order)
+      // We iterate through players to maintain a stable logic, skipping captain
+      for (const p of lobby.players) {
+          if (p.isCaptain) continue;
+          const k = collectedMap.get(p.id);
+          if (k) {
+              if (k.gemini) geminiKeys.push(k.gemini);
+              if (k.navy) navyKeys.push(k.navy);
+          }
+      }
+
+      lobby.geminiKeys = geminiKeys;
+      lobby.navyKeys = navyKeys;
+  }
+
   public async startGame(code: string, playerId: string) {
     if (!this.isCaptain(code, playerId)) return;
     const lobby = this.lobbies.get(code)!;
 
-    // API Key Validation Check
-    if (!lobby.settings.apiKey || lobby.settings.apiKey.length < 10) {
-        this.io.to(code).emit('error', { errorCode: 'ERR_MISSING_API_KEY', message: "Captain must set a valid API Key in settings before starting." });
+    // 1. Collect Keys (Async)
+    // We can emit a temporary status to UI if we want "Starting..."
+    await this.collectKeys(code);
+
+    // 2. Validate Captain Key
+    // Check if we have at least one key (which naturally should be the captain's due to order)
+    if (lobby.geminiKeys.length === 0) {
+        this.io.to(code).emit('error', { errorCode: 'ERR_MISSING_API_KEY', message: "Captain must provide a Gemini API Key to start." });
         return;
     }
 
     lobby.status = GameStatus.SCENARIO_GENERATION;
     this.emitUpdate(code);
 
+    const keyManager = new KeyManager(lobby.geminiKeys[0], lobby.geminiKeys.slice(1));
+
     try {
       const lang = lobby.settings.storyLanguage || 'en';
 
       const scenario = await GeminiService.generateScenario(
-        lobby.settings.apiKey,
+        keyManager,
         lobby.settings.mode,
         lobby.settings.scenarioType,
         lobby.players,
@@ -154,7 +227,7 @@ export class LobbyService {
       if (lobby.settings.imageGenerationMode !== ImageGenerationMode.NONE) {
           try {
              const prompt = `Create a 16:9 cinematic realistic image visualizing this scene: ${scenario.scenario_text}`;
-             const base64 = await GeminiService.generateImage(lobby.settings.apiKey, prompt);
+             const base64 = await GeminiService.generateImage(keyManager, prompt);
              if (base64) {
                  const url = await saveImage(base64);
                  lobby.scenarioImage = url;
@@ -169,7 +242,7 @@ export class LobbyService {
     } catch (e) {
       console.error(`Lobby ${code} Start Error:`, e);
       lobby.status = GameStatus.LOBBY_WAITING;
-      this.io.to(code).emit('error', { message: "Failed to generate scenario. Check API Key." });
+      this.io.to(code).emit('error', { message: "Failed to generate scenario. Check API Key availability." });
       this.emitUpdate(code);
     }
   }
@@ -242,6 +315,15 @@ export class LobbyService {
      lobby.status = GameStatus.JUDGING;
      this.emitUpdate(code);
 
+     if (lobby.geminiKeys.length === 0) {
+         lobby.status = GameStatus.PLAYER_INPUT;
+         this.io.to(code).emit('error', { message: "No API Keys available." });
+         this.emitUpdate(code);
+         return;
+     }
+
+     const keyManager = new KeyManager(lobby.geminiKeys[0], lobby.geminiKeys.slice(1));
+
      try {
          const lang = lobby.settings.storyLanguage || 'en';
 
@@ -256,7 +338,7 @@ export class LobbyService {
          };
 
          const result = await GeminiService.judgeRound(
-             lobby.settings.apiKey,
+             keyManager,
              safeScenario,
              lobby.players,
              lobby.settings.mode,
@@ -268,7 +350,7 @@ export class LobbyService {
          if (lobby.settings.imageGenerationMode === ImageGenerationMode.FULL) {
              try {
                  const prompt = `Create a 16:9 cinematic realistic image visualizing the aftermath: ${result.story}. Action of each hero separately (black silhouettes), collage in one row.`;
-                 const base64 = await GeminiService.generateImage(lobby.settings.apiKey, prompt);
+                 const base64 = await GeminiService.generateImage(keyManager, prompt);
                  if (base64) {
                      const url = await saveImage(base64);
                      result.image = url;
@@ -309,6 +391,9 @@ export class LobbyService {
       lobby.scenario = null;
       lobby.scenarioImage = undefined;
       lobby.roundResult = undefined;
+      lobby.geminiKeys = [];
+      lobby.navyKeys = [];
+
       lobby.players.forEach(p => {
           p.status = 'waiting';
           p.actionText = undefined;

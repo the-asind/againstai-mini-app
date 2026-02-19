@@ -51,6 +51,19 @@ class SocketServiceImpl {
         console.error("Server Error:", err.message);
         this.notifyErrorSubscribers(err);
     });
+
+    // Handle key request from server
+    this.socket.on('request_keys', () => {
+        const gemini = localStorage.getItem('against_ai_api_key') || undefined;
+        const navy = localStorage.getItem('against_ai_navy_key') || undefined;
+
+        if (this.currentLobbyCode) {
+            this.socket?.emit('provide_keys', {
+                code: this.currentLobbyCode,
+                keys: { gemini, navy }
+            });
+        }
+    });
   }
 
   public subscribe(callback: GameStateCallback): () => void {
@@ -124,9 +137,9 @@ class SocketServiceImpl {
   public updatePlayer(code: string, updates: Partial<Player>) {
       this.socket?.emit('update_player', { code, updates });
 
-      // Update local session state if name changed
-      if (updates.name && this.currentPlayer) {
-          this.currentPlayer = { ...this.currentPlayer, name: updates.name };
+      // Update local session state
+      if (this.currentPlayer) {
+          this.currentPlayer = { ...this.currentPlayer, ...updates };
       }
   }
 

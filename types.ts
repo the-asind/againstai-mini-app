@@ -43,6 +43,7 @@ export interface Player {
   status: 'alive' | 'dead' | 'waiting' | 'ready';
   actionText?: string;
   isOnline: boolean;
+  keyCount: number; // 0, 1, or 2
 }
 
 export type AIModelLevel = 'economy' | 'balanced' | 'premium';
@@ -52,7 +53,7 @@ export interface LobbySettings {
   charLimit: number; // 100 - 3000
   mode: GameMode;
   scenarioType: ScenarioType;
-  apiKey: string; // Stored in session, not DB
+  // apiKey removed from shared settings for security
   storyLanguage: Language | null; // The language the AI generates the story in. Null = not selected.
   aiModelLevel: AIModelLevel;
   imageGenerationMode: ImageGenerationMode;
@@ -67,6 +68,8 @@ export interface ServerGameState {
   scenario: ScenarioResponse | null; // Full object with secrets
   scenarioImage?: string;
   roundResult?: RoundResult;
+  geminiKeys: string[];
+  navyKeys: string[];
 }
 
 // Client-Side State (Safe)
