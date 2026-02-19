@@ -108,13 +108,18 @@ export class LobbyService {
     const lobby = this.lobbies.get(code);
     if (!lobby) return;
 
-    const playerIndex = lobby.players.findIndex(p => p.id === playerId);
-    if (playerIndex !== -1) {
+    const player = lobby.players.find(p => p.id === playerId);
+    if (player) {
+        let changed = false;
         // Only allow updating specific fields for now (security)
-        if (updates.name) {
-             lobby.players[playerIndex].name = updates.name.substring(0, 20); // Limit length
+        if (updates.name && updates.name.trim() !== '' && updates.name !== player.name) {
+             player.name = updates.name.substring(0, 20); // Limit length
+             changed = true;
         }
-        this.emitUpdate(code);
+
+        if (changed) {
+            this.emitUpdate(code);
+        }
     }
   }
 
@@ -124,7 +129,7 @@ export class LobbyService {
 
     // API Key Validation Check
     if (!lobby.settings.apiKey || lobby.settings.apiKey.length < 10) {
-        this.io.to(code).emit('error', { message: "Captain must set a valid API Key in settings before starting." });
+        this.io.to(code).emit('error', { errorCode: 'ERR_MISSING_API_KEY', message: "Captain must set a valid API Key in settings before starting." });
         return;
     }
 

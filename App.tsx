@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel, ImageGenerationMode, ServerGameState, ScenarioResponse, TelegramWebApp } from './types';
+import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel, ImageGenerationMode } from './types';
 import { translations, t } from './i18n';
 import { DEFAULT_SETTINGS, MIN_TIME, MAX_TIME, MIN_CHARS, MAX_CHARS } from './constants';
 import { SocketService } from './services/socketService';
@@ -26,6 +26,62 @@ const Toast = ({ toast }: { toast: { msg: string, type: 'success' | 'error' } | 
            </svg>
        )}
        {toast?.msg}
+    </div>
+);
+
+interface SettingsModalProps {
+    settingsNick: string;
+    setSettingsNick: (val: string) => void;
+    settingsApiKey: string;
+    setSettingsApiKey: (val: string) => void;
+    saveSettings: () => void;
+    setShowSettingsModal: (val: boolean) => void;
+    lang: Language;
+    user: Player | null;
+}
+
+const SettingsModal: React.FC<SettingsModalProps> = ({
+    settingsNick, setSettingsNick, settingsApiKey, setSettingsApiKey,
+    saveSettings, setShowSettingsModal, lang, user
+}) => (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+        <div className="bg-tg-secondaryBg w-full max-w-sm rounded-2xl p-6 border border-tg-hint/20 shadow-2xl space-y-4">
+            <h3 className="text-xl font-bold text-center">{t('settingsTitle', lang)}</h3>
+
+            <div className="space-y-2">
+                <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('nickname', lang)}</label>
+                <Input
+                    value={settingsNick}
+                    onChange={(e) => setSettingsNick(e.target.value)}
+                    placeholder={t('enterNickname', lang)}
+                />
+            </div>
+
+            {user?.isCaptain && (
+                <div className="space-y-2">
+                     <label className="text-xs text-tg-hint uppercase font-bold ml-1">Gemini API Key</label>
+                     <Input
+                        value={settingsApiKey}
+                        onChange={(e) => setSettingsApiKey(e.target.value)}
+                        placeholder="AI Studio Key"
+                        type="password"
+                        autoComplete="off"
+                     />
+                     <p className="text-[10px] text-tg-hint">
+                        {t('apiKeyHintPrefix', lang)} <a href="https://aistudio.google.com/api-keys" target="_blank" className="underline text-tg-link">{t('apiKeyLink', lang)}</a>.
+                     </p>
+                </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+                <Button variant="secondary" onClick={() => setShowSettingsModal(false)}>
+                    {t('cancel', lang)}
+                </Button>
+                <Button onClick={saveSettings}>
+                    {t('save', lang)}
+                </Button>
+            </div>
+        </div>
     </div>
 );
 
@@ -403,50 +459,6 @@ const App: React.FC = () => {
       triggerHaptic('success');
   };
 
-  // -- Renders --
-  
-  const SettingsModal = () => (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-tg-secondaryBg w-full max-w-sm rounded-2xl p-6 border border-tg-hint/20 shadow-2xl space-y-4">
-              <h3 className="text-xl font-bold text-center">{t('settingsTitle', lang)}</h3>
-
-              <div className="space-y-2">
-                  <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('nickname', lang)}</label>
-                  <Input
-                      value={settingsNick}
-                      onChange={(e) => setSettingsNick(e.target.value)}
-                      placeholder={t('enterNickname', lang)}
-                  />
-              </div>
-
-              {user?.isCaptain && (
-                  <div className="space-y-2">
-                       <label className="text-xs text-tg-hint uppercase font-bold ml-1">Gemini API Key</label>
-                       <Input
-                          value={settingsApiKey}
-                          onChange={(e) => setSettingsApiKey(e.target.value)}
-                          placeholder="AI Studio Key"
-                          type="password"
-                          autoComplete="off"
-                       />
-                       <p className="text-[10px] text-tg-hint">
-                          {t('apiKeyHintPrefix', lang)} <a href="https://aistudio.google.com/api-keys" target="_blank" className="underline text-tg-link">{t('apiKeyLink', lang)}</a>.
-                       </p>
-                  </div>
-              )}
-
-              <div className="flex gap-3 pt-2">
-                  <Button variant="secondary" onClick={() => setShowSettingsModal(false)}>
-                      {t('cancel', lang)}
-                  </Button>
-                  <Button onClick={saveSettings}>
-                      {t('save', lang)}
-                  </Button>
-              </div>
-          </div>
-      </div>
-  );
-
   if (gameState.status === GameStatus.HOME) {
     return (
       <div className="min-h-screen p-6 flex flex-col items-center relative">
@@ -498,7 +510,18 @@ const App: React.FC = () => {
       return (
           <div className="min-h-screen flex flex-col p-4 relative">
               <Toast toast={toast} />
-              {showSettingsModal && <SettingsModal />}
+              {showSettingsModal && (
+                  <SettingsModal
+                      settingsNick={settingsNick}
+                      setSettingsNick={setSettingsNick}
+                      settingsApiKey={settingsApiKey}
+                      setSettingsApiKey={setSettingsApiKey}
+                      saveSettings={saveSettings}
+                      setShowSettingsModal={setShowSettingsModal}
+                      lang={lang}
+                      user={user}
+                  />
+              )}
 
               <div className="flex justify-between items-center mb-6">
                   <h2 className="text-xl font-bold">{t('lobbySetup', lang)}</h2>
@@ -573,7 +596,7 @@ const App: React.FC = () => {
                   {/* Language Selection */}
                   <div>
                       <div className="flex justify-between text-sm mb-2">
-                          <span>{t('storyLang', lang)}</span>
+                          <span>{t('storyLanguage', lang)}</span>
                       </div>
                       <div className="flex gap-2 p-1 bg-tg-bg rounded-lg">
                           <button 
