@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { GameState, LobbySettings, Player, GameStatus } from '../types';
+import { STORAGE_KEYS } from '../constants';
 
 const URL = import.meta.env.VITE_API_URL || undefined; // undefined = auto-detect host
 
@@ -51,6 +52,19 @@ class SocketServiceImpl {
         console.error("Server Error:", err.message);
         this.notifyErrorSubscribers(err);
     });
+
+    // Handle key request from server
+    this.socket.on('request_keys', () => {
+        const gemini = localStorage.getItem(STORAGE_KEYS.API_KEY) || undefined;
+        const navy = localStorage.getItem(STORAGE_KEYS.NAVY_KEY) || undefined;
+
+        if (this.currentLobbyCode) {
+            this.socket?.emit('provide_keys', {
+                code: this.currentLobbyCode,
+                keys: { gemini, navy }
+            });
+        }
+    });
   }
 
   public subscribe(callback: GameStateCallback): () => void {
@@ -65,14 +79,6 @@ class SocketServiceImpl {
       return () => {
           this.errorSubscribers = this.errorSubscribers.filter(s => s !== callback);
       };
-  }
-
-  private notifySubscribers(state: GameState) {
-      this.subscribers.forEach(cb => cb(state));
-  }
-
-  private notifyErrorSubscribers(error: { message: string }) {
-      this.errorSubscribers.forEach(cb => cb(error));
   }
 
   public async validateApiKey(apiKey: string): Promise<boolean> {
@@ -124,9 +130,9 @@ class SocketServiceImpl {
   public updatePlayer(code: string, updates: Partial<Player>) {
       this.socket?.emit('update_player', { code, updates });
 
-      // Update local session state if name changed
-      if (updates.name && this.currentPlayer) {
-          this.currentPlayer = { ...this.currentPlayer, name: updates.name };
+      // Update local session state
+      if (this.currentPlayer) {
+          this.currentPlayer = { ...this.currentPlayer, ...updates };
       }
   }
 

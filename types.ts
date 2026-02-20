@@ -23,6 +23,7 @@ export enum GameStatus {
   HOME = 'HOME',
   LOBBY_SETUP = 'LOBBY_SETUP',
   LOBBY_WAITING = 'LOBBY_WAITING',
+  LOBBY_STARTING = 'LOBBY_STARTING', // Added atomic start state
   SCENARIO_GENERATION = 'SCENARIO_GENERATION',
   PLAYER_INPUT = 'PLAYER_INPUT',
   JUDGING = 'JUDGING',
@@ -43,6 +44,7 @@ export interface Player {
   status: 'alive' | 'dead' | 'waiting' | 'ready';
   actionText?: string;
   isOnline: boolean;
+  keyCount: 0 | 1 | 2; // Stricter type: 0, 1, or 2
 }
 
 export type AIModelLevel = 'economy' | 'balanced' | 'premium';
@@ -52,7 +54,7 @@ export interface LobbySettings {
   charLimit: number; // 100 - 3000
   mode: GameMode;
   scenarioType: ScenarioType;
-  apiKey: string; // Stored in session, not DB
+  // apiKey removed from shared settings for security
   storyLanguage: Language | null; // The language the AI generates the story in. Null = not selected.
   aiModelLevel: AIModelLevel;
   imageGenerationMode: ImageGenerationMode;
@@ -67,6 +69,8 @@ export interface ServerGameState {
   scenario: ScenarioResponse | null; // Full object with secrets
   scenarioImage?: string;
   roundResult?: RoundResult;
+  geminiKeys: string[];
+  navyKeys: string[];
   resultsRevealed: boolean;
 }
 
