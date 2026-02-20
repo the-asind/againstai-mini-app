@@ -71,6 +71,7 @@ export interface ServerGameState {
   roundResult?: RoundResult;
   geminiKeys: string[];
   navyKeys: string[];
+  resultsRevealed: boolean;
 }
 
 // Client-Side State (Safe)
@@ -82,6 +83,7 @@ export interface GameState {
   scenario: string | null; // Just the text!
   scenarioImage?: string;
   roundResult?: RoundResult;
+  resultsRevealed: boolean;
 }
 
 export interface RoundResult {

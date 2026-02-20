@@ -51,6 +51,7 @@ export class LobbyService {
       scenario: null,
       geminiKeys: [],
       navyKeys: []
+      resultsRevealed: false
     };
 
     this.lobbies.set(code, initialState);
@@ -295,6 +296,7 @@ export class LobbyService {
     if (!lobby) return;
 
     lobby.status = GameStatus.PLAYER_INPUT;
+    lobby.resultsRevealed = false; // Reset for new round
 
     lobby.players.forEach(p => {
         p.status = 'waiting';
@@ -418,6 +420,7 @@ export class LobbyService {
 
          lobby.roundResult = result;
          lobby.status = GameStatus.RESULTS;
+         lobby.resultsRevealed = false; // Ensure it starts hidden
 
          lobby.players.forEach(p => {
              if (result.survivors.includes(p.id)) {
@@ -437,6 +440,16 @@ export class LobbyService {
      }
   }
 
+  public revealResults(code: string, playerId: string) {
+      if (!this.isCaptain(code, playerId)) return;
+      const lobby = this.lobbies.get(code)!;
+
+      if (lobby.status === GameStatus.RESULTS && !lobby.resultsRevealed) {
+          lobby.resultsRevealed = true;
+          this.emitUpdate(code);
+      }
+  }
+
   public resetGame(code: string, playerId: string) {
       if (!this.isCaptain(code, playerId)) return;
       const lobby = this.lobbies.get(code)!;
@@ -448,6 +461,7 @@ export class LobbyService {
       lobby.geminiKeys = [];
       lobby.navyKeys = [];
 
+      lobby.resultsRevealed = false;
       lobby.players.forEach(p => {
           p.status = 'waiting';
           p.actionText = undefined;
