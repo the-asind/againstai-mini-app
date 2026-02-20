@@ -169,6 +169,11 @@ const App: React.FC = () => {
   const [textRevealed, setTextRevealed] = useState(false);
   const [revealSpeedMultiplier, setRevealSpeedMultiplier] = useState(1);
   const tapCountRef = useRef(0);
+  // Scenario Reveal State
+  const [displayedScenario, setDisplayedScenario] = useState("");
+  const [scenarioRevealed, setScenarioRevealed] = useState(false);
+  const [scenarioRevealSpeed, setScenarioRevealSpeed] = useState(1);
+  const scenarioTapCountRef = useRef(0);
 
   // Helper for Haptics to avoid v6.0 crash
   const triggerHaptic = (type: 'error' | 'success' | 'warning' | 'medium') => {
@@ -281,10 +286,16 @@ const App: React.FC = () => {
   // Reset text reveal on new round/state change
   useEffect(() => {
      if (gameState.status !== GameStatus.RESULTS) {
-         setDisplayedText('');
+         setDisplayedText("");
          setTextRevealed(false);
          setRevealSpeedMultiplier(1);
          tapCountRef.current = 0;
+     }
+     if (gameState.status !== GameStatus.PLAYER_INPUT) {
+         setDisplayedScenario("");
+         setScenarioRevealed(false);
+         setScenarioRevealSpeed(1);
+         scenarioTapCountRef.current = 0;
      }
   }, [gameState.status]);
 
@@ -297,6 +308,26 @@ const App: React.FC = () => {
           }
       }
   }, [gameState.status, gameState.resultsRevealed, gameState.roundResult, textRevealed]);
+
+  // Scenario Typewriter Effect
+  useEffect(() => {
+      if (gameState.status === GameStatus.PLAYER_INPUT && gameState.scenario) {
+          const fullText = gameState.scenario;
+          if (scenarioRevealed || displayedScenario.length >= fullText.length) {
+              if (!scenarioRevealed) setScenarioRevealed(true);
+              return;
+          }
+
+          const baseSpeed = 30; // ms per char
+          const currentSpeed = baseSpeed / scenarioRevealSpeed;
+
+          const timer = setTimeout(() => {
+              setDisplayedScenario(fullText.slice(0, displayedScenario.length + 1));
+          }, currentSpeed);
+
+          return () => clearTimeout(timer);
+      }
+  }, [gameState.status, gameState.scenario, displayedScenario, scenarioRevealed, scenarioRevealSpeed]);
 
   // Typewriter Effect
   useEffect(() => {
@@ -324,6 +355,17 @@ const App: React.FC = () => {
 
 
   // -- Handlers --
+
+  const handleScenarioTap = () => {
+      if (scenarioRevealed) return;
+      if (!user?.isCaptain) return;
+
+      scenarioTapCountRef.current += 1;
+      if (scenarioTapCountRef.current % 3 === 0) {
+          setScenarioRevealSpeed(prev => prev * 1.5);
+          triggerHaptic("medium");
+      }
+  };
 
   const handleResultsTap = () => {
       if (textRevealed || gameState.resultsRevealed) return;
@@ -461,402 +503,47 @@ const App: React.FC = () => {
   // Timer Logic
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
-    if (gameState.status === GameStatus.PLAYER_INPUT) {
-      interval = setInterval(() => {
-        timeLeftRef.current -= 1;
-        setTimeLeftDisplay(timeLeftRef.current);
-        
-        if (timeLeftRef.current <= 0) {
-           clearInterval(interval);
-           // Auto-submit logic is handled by server timeout.
-           // But we can submit partial text if we want to be safe.
-           // Use Ref to avoid stale closure
-           if (actionInputRef.current.trim()) {
-               handleSubmitAction(true);
-           }
-        }
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameState.status]);
+      if (gameState.status === GameStatus.PLAYER_INPUT) {
+      const totalTime = gameState.settings.timeLimitSeconds;
+      const timeLeft = timeLeftDisplay;
 
-  const handleSubmitAction = async (force = false) => {
-    if (!user || !gameState.lobbyCode) return;
-    
-    // Use Ref for latest input
-    let currentInput = actionInputRef.current.trim();
+      // Calculate Low Time Thresholds (max 60s/10% and max 30s/5%)
+      const isLowTime = timeLeft <= Math.min(60, totalTime * 0.1);
+      const isCriticalTime = timeLeft <= Math.min(30, totalTime * 0.05);
+      const isVeryCritical = timeLeft <= 3;
 
-    if (!currentInput && !force) return;
-
-    setLoading(true);
-
-    if (force) {
-        if (!currentInput) {
-            currentInput = t('frozenInFear', lang);
-        }
-        currentInput += t('timeOutNote', lang);
-    }
-    
-    // Server performs cheat detection now
-    SocketService.submitAction(gameState.lobbyCode, currentInput);
-
-    // Optimistic Update
-    setUser(prev => prev ? ({ ...prev, status: 'ready' }) : null);
-
-    setLoading(false);
-  };
-
-  const handleRestart = () => {
-      if (!gameState.lobbyCode) return;
-      handleActionInputChange("");
-      setErrorMsg("");
-      SocketService.resetGame(gameState.lobbyCode);
-  };
-
-  // Settings Modal Handlers
-  const openSettings = () => {
-      setSettingsNick(user?.name || '');
-      setSettingsApiKey(localStorage.getItem(STORAGE_KEYS.API_KEY) || '');
-      setSettingsNavyApiKey(localStorage.getItem(STORAGE_KEYS.NAVY_KEY) || '');
-      setShowSettingsModal(true);
-  };
-
-  const saveSettings = () => {
-      const cleanNick = settingsNick.trim();
-      const cleanKey = settingsApiKey.trim();
-      const cleanNavyKey = settingsNavyApiKey.trim();
-
-      if (!cleanNick) {
-          setToast({ msg: t('nicknameRequired', lang), type: 'error' });
-          return;
-      }
-
-      // 1. Save Nickname
-      localStorage.setItem(STORAGE_KEYS.NICKNAME, cleanNick);
-
-      // 2. Save API Keys
-      if (cleanKey) localStorage.setItem(STORAGE_KEYS.API_KEY, cleanKey);
-      else localStorage.removeItem(STORAGE_KEYS.API_KEY);
-
-      if (cleanNavyKey) localStorage.setItem(STORAGE_KEYS.NAVY_KEY, cleanNavyKey);
-      else localStorage.removeItem(STORAGE_KEYS.NAVY_KEY);
-
-      const newKeyCount = getKeyCount();
-
-      // 3. Update Player State on Server
-      if (user && gameState.lobbyCode) {
-          SocketService.updatePlayer(gameState.lobbyCode, {
-              name: cleanNick,
-              keyCount: newKeyCount
-          });
-          setUser({ ...user, name: cleanNick, keyCount: newKeyCount });
-      }
-
-      setShowSettingsModal(false);
-      setToast({ msg: t('save', lang), type: 'success' });
-      triggerHaptic('success');
-  };
-
-  if (gameState.status === GameStatus.HOME) {
-    return (
-      <div className="min-h-screen p-6 flex flex-col items-center relative">
-        <Toast toast={toast} />
-        {/* Lang Switch */}
-        <div className="absolute top-4 right-4 flex gap-2 text-sm font-bold z-10">
-            <button onClick={() => setLang('en')} className={lang === 'en' ? 'text-tg-button' : 'text-tg-hint'}>EN</button>
-            <span className="text-tg-hint">|</span>
-            <button onClick={() => setLang('ru')} className={lang === 'ru' ? 'text-tg-button' : 'text-tg-hint'}>RU</button>
-        </div>
-
-        {/* Header */}
-        <div className="mt-12 mb-8 text-center space-y-2">
-            <h1 className="text-4xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-500">
-            AGAINST AI
-            </h1>
-            <p className="text-tg-hint text-xs max-w-xs mx-auto">{t('mockNote', lang)}</p>
-        </div>
-
-        <div className="w-full max-w-sm space-y-8 animate-fade-in">
-            {/* Create Lobby Button */}
-            <Button onClick={handleCreateLobby} isLoading={loading}>
-                {t('createLobby', lang)}
-            </Button>
-
-            {/* Divider */}
-            <div className="relative flex py-2 items-center">
-                <div className="flex-grow border-t border-tg-hint/20"></div>
-                <span className="flex-shrink mx-4 text-tg-hint text-xs uppercase">{t('or', lang)}</span>
-                <div className="flex-grow border-t border-tg-hint/20"></div>
-            </div>
-
-            {/* Join Lobby Code Input */}
-            <div className="space-y-2">
-                 <label className="text-xs text-tg-hint uppercase font-bold text-center block tracking-widest">{t('enterCode', lang)}</label>
-                 <CodeInput
-                    onComplete={(code) => handleJoinLobby(code)}
-                    hasError={!!errorMsg}
-                    disabled={loading}
-                 />
-                 {errorMsg && <p className="text-red-500 text-sm text-center font-bold animate-pulse mt-2">{errorMsg}</p>}
-            </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (gameState.status === GameStatus.LOBBY_WAITING || gameState.status === GameStatus.LOBBY_SETUP || gameState.status === GameStatus.LOBBY_STARTING) {
       return (
-          <div className="min-h-screen flex flex-col p-4 relative">
-              <Toast toast={toast} />
-              {showSettingsModal && (
-                  <SettingsModal
-                      settingsNick={settingsNick}
-                      setSettingsNick={setSettingsNick}
-                      settingsApiKey={settingsApiKey}
-                      setSettingsApiKey={setSettingsApiKey}
-                      settingsNavyApiKey={settingsNavyApiKey}
-                      setSettingsNavyApiKey={setSettingsNavyApiKey}
-                      saveSettings={saveSettings}
-                      setShowSettingsModal={setShowSettingsModal}
-                      lang={lang}
-                      user={user}
-                  />
-              )}
+          <div className={`min-h-screen flex flex-col p-4 relative transition-colors duration-500 ${isCriticalTime ? 'bg-red-900/20 animate-pulse-red' : ''} ${isVeryCritical ? 'animate-shake' : ''}`}>
 
-              <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-bold">{t('lobbySetup', lang)}</h2>
-                  <div className="flex items-center gap-2">
-                       {/* Settings Button */}
-                       <button
-                         onClick={openSettings}
-                         className="p-2 rounded-full bg-tg-secondaryBg border border-tg-hint/20 text-tg-hint hover:text-tg-text transition-colors"
-                       >
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                             <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-                           </svg>
-                       </button>
-
-                       <div className="flex items-center gap-2 bg-tg-secondaryBg px-3 py-1 rounded-lg border border-tg-hint/20">
-                          <span className="text-xs text-tg-hint uppercase">{t('codeLabel', lang)}</span>
-                          <span className="text-xl font-mono font-bold tracking-widest select-all">{gameState.lobbyCode}</span>
-                       </div>
-                  </div>
+              {/* Timer - Only show when revealed */}
+              <div className={`flex justify-between items-center mb-4 bg-tg-secondaryBg p-3 rounded-lg sticky top-0 z-10 shadow-lg transition-all duration-300 ${scenarioRevealed ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'} ${isLowTime ? 'animate-shake' : ''}`}>
+                  <span className={`text-sm font-bold ${isCriticalTime ? 'text-red-500 animate-pulse' : 'text-tg-hint'}`}>{t('timeLeft', lang)}</span>
+                  <span className={`text-2xl font-mono font-bold ${isCriticalTime ? 'text-red-600 animate-pulse' : 'text-tg-text'}`}>{timeLeftDisplay}s</span>
               </div>
 
-              {/* API Key Warning for Captain */}
-              {user?.isCaptain && !localStorage.getItem(STORAGE_KEYS.API_KEY) && (
-                  <div className="bg-red-500/10 border border-red-500/50 p-3 rounded-xl mb-4 text-center animate-pulse">
-                      <p className="text-red-500 text-xs font-bold">{t('missingApiKey', lang)}</p>
-                      <p className="text-tg-hint text-[10px]">{t('missingApiKeyDesc', lang)}</p>
-                  </div>
-              )}
-
-              <div className="bg-tg-secondaryBg p-5 rounded-2xl border border-tg-hint/10 space-y-4 mb-4">
-                  <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">{t('gameSettings', lang)}</h3>
-
-                  {/* Scenario Type Selection */}
-                  <div
-                    className="flex overflow-x-auto space-x-3 pb-2 scrollbar-hide cursor-grab active:cursor-grabbing"
-                    ref={scrollContainerRef}
-                    onMouseDown={handleMouseDown}
-                    onMouseLeave={handleMouseLeave}
-                    onMouseUp={handleMouseUp}
-                    onMouseMove={handleMouseMove}
-                  >
-                      {Object.values(ScenarioType).map(type => (
-                          <button
-                            key={type}
-                            onClick={() => handleUpdateSettings('scenarioType', type)}
-                            disabled={!user?.isCaptain}
-                            className={`flex-shrink-0 px-4 py-2 rounded-xl border transition-all ${gameState.settings.scenarioType === type
-                                ? 'bg-tg-button text-white border-transparent shadow-lg scale-105'
-                                : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'}`}
-                          >
-                              {type.replace(/_/g, ' ').toUpperCase()}
-                          </button>
-                      ))}
-                  </div>
-
-                  {/* Mode Selection */}
-                  <div className="grid grid-cols-3 gap-2">
-                      {Object.values(GameMode).map(mode => (
-                          <button
-                            key={mode}
-                            onClick={() => handleUpdateSettings('mode', mode)}
-                            disabled={!user?.isCaptain}
-                            className={`py-2 text-xs font-bold uppercase rounded-lg border transition-all ${gameState.settings.mode === mode
-                                ? 'bg-tg-button text-white border-transparent'
-                                : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'}`}
-                          >
-                              {mode === GameMode.BATTLE_ROYALE ? 'ROYALE' : mode}
-                          </button>
-                      ))}
-                  </div>
-
-                  {/* Language Selection */}
-                  <div>
-                      <div className="flex justify-between text-sm mb-2">
-                          <span>{t('storyLanguage', lang)}</span>
-                      </div>
-                      <div className="flex gap-2 p-1 bg-tg-bg rounded-lg">
-                          <button 
-                            onClick={() => handleUpdateSettings('storyLanguage', 'en')}
-                            disabled={!user?.isCaptain}
-                            className={`flex-1 py-1 text-sm rounded-md transition-colors ${gameState.settings.storyLanguage === 'en' ? 'bg-tg-button text-white' : 'text-tg-hint opacity-70'}`}
-                          >
-                            English
-                          </button>
-                          <button 
-                            onClick={() => handleUpdateSettings('storyLanguage', 'ru')}
-                            disabled={!user?.isCaptain}
-                            className={`flex-1 py-1 text-sm rounded-md transition-colors ${gameState.settings.storyLanguage === 'ru' ? 'bg-tg-button text-white' : 'text-tg-hint opacity-70'}`}
-                          >
-                            Русский
-                          </button>
-                      </div>
-                  </div>
-
-                  {/* AI Model Level */}
-                  <div>
-                      <div className="flex justify-between text-sm mb-2">
-                          <span>{t('aiLevel', lang)}</span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                          {(['economy', 'balanced', 'premium'] as AIModelLevel[]).map((level) => (
-                             <button
-                                key={level}
-                                onClick={() => handleUpdateSettings('aiModelLevel', level)}
-                                disabled={!user?.isCaptain}
-                                className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
-                                    ${gameState.settings.aiModelLevel === level
-                                        ? 'bg-tg-button text-white border-transparent'
-                                        : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
-                                    }
-                                    ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
-                                `}
-                             >
-                                 <span>{t(level, lang)}</span>
-                                 <span className="text-[8px] opacity-70 normal-case leading-tight max-w-full overflow-hidden text-ellipsis">
-                                     {level === 'economy' && t('economyDesc', lang)}
-                                     {level === 'balanced' && t('balancedDesc', lang)}
-                                     {level === 'premium' && t('premiumDesc', lang)}
-                                 </span>
-                             </button>
-                          ))}
-                      </div>
-                  </div>
-
-                  {/* Image Generation Mode */}
-                  <div>
-                      <div className="flex justify-between text-sm mb-2">
-                          <span>{t('imageGenerationMode', lang)}</span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                          {(['none', 'scenario', 'full'] as ImageGenerationMode[]).map((mode) => (
-                             <button
-                                key={mode}
-                                onClick={() => handleUpdateSettings('imageGenerationMode', mode)}
-                                disabled={!user?.isCaptain}
-                                className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
-                                    ${gameState.settings.imageGenerationMode === mode
-                                        ? 'bg-tg-button text-white border-transparent'
-                                        : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
-                                    }
-                                    ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
-                                `}
-                             >
-                                 <span>
-                                     {mode === 'none' && t('imgNone', lang)}
-                                     {mode === 'scenario' && t('imgScenario', lang)}
-                                     {mode === 'full' && t('imgFull', lang)}
-                                 </span>
-                                 <span className="text-[8px] opacity-70 normal-case leading-tight max-w-full overflow-hidden text-ellipsis">
-                                     {mode === 'none' && t('imgNoneDesc', lang)}
-                                     {mode === 'scenario' && t('imgScenarioDesc', lang)}
-                                     {mode === 'full' && t('imgFullDesc', lang)}
-                                 </span>
-                             </button>
-                          ))}
-                      </div>
-                  </div>
-              </div>
-
-              <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">{t('players', lang)}</h3>
-              <div className="flex-grow space-y-2 overflow-y-auto">
-                  {gameState.players.map(p => (
-                      <div key={p.id} className={`flex items-center p-3 bg-tg-secondaryBg rounded-lg ${!p.isOnline ? 'opacity-50' : ''}`}>
-                          <div className={`w-3 h-3 rounded-full mr-3 ${p.status === 'ready' ? 'bg-green-500' : 'bg-gray-500'}`} />
-                          <span className="font-medium">{p.name}</span>
-                          {/* API Key Indicators - explicit comparison */}
-                          <div className="ml-2 flex gap-1">
-                              {p.keyCount >= 1 ? <span className="text-green-500 text-xs">✓</span> : null}
-                              {p.keyCount >= 2 ? <span className="text-green-500 text-xs">✓</span> : null}
-                          </div>
-                          {!p.isOnline && <span className="ml-2 text-xs text-red-500 font-bold">[OFFLINE]</span>}
-                          {p.isCaptain && <span className="ml-auto text-xs text-yellow-500">👑 Captain</span>}
-                      </div>
-                  ))}
-              </div>
-
-              <div className="space-y-3 mt-6">
-                 {user?.isCaptain ? (
-                     <Button
-                        onClick={handleStartGame}
-                        disabled={gameState.players.length < 2 || !localStorage.getItem(STORAGE_KEYS.API_KEY)}
-                        className={!localStorage.getItem(STORAGE_KEYS.API_KEY) ? 'opacity-50' : ''}
-                     >
-                        {gameState.status === GameStatus.LOBBY_STARTING ? t('loading', lang) : t('startGame', lang)}
-                     </Button>
-                 ) : (
-                     <p className="text-center text-tg-hint animate-pulse">
-                         {gameState.status === GameStatus.LOBBY_STARTING ? t('game_starting', lang) : t('waitingForPlayers', lang)}
-                     </p>
-                 )}
-                 <Button variant="secondary" onClick={handleShare}>
-                     {t('shareInvite', lang)}
-                 </Button>
-              </div>
-          </div>
-      );
-  }
-
-  if (gameState.status === GameStatus.SCENARIO_GENERATION) {
-      return (
-          <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center space-y-6">
-              <div className="w-16 h-16 border-4 border-tg-button border-t-transparent rounded-full animate-spin"></div>
-              <h2 className="text-2xl font-bold animate-pulse">{t('generatingScenario', lang)}</h2>
-              <p className="text-tg-hint text-sm">{t('geminiThinking', lang)}</p>
-          </div>
-      );
-  }
-
-  if (gameState.status === GameStatus.PLAYER_INPUT) {
-      return (
-          <div className="min-h-screen flex flex-col p-4">
-              <div className="flex justify-between items-center mb-4 bg-tg-secondaryBg p-3 rounded-lg sticky top-0 z-10 shadow-lg">
-                  <span className="text-sm font-bold text-red-400">{t('timeLeft', lang)}</span>
-                  <span className="text-2xl font-mono font-bold text-red-500">{timeLeftDisplay}s</span>
-              </div>
-
-              <div className="bg-gradient-to-b from-gray-900 to-gray-800 p-5 rounded-2xl border border-gray-700 shadow-xl mb-6">
+              <div
+                  className="bg-gradient-to-b from-gray-900 to-gray-800 p-5 rounded-2xl border border-gray-700 shadow-xl mb-6 transition-all active:scale-[0.98]"
+                  onClick={handleScenarioTap}
+              >
                   {gameState.scenarioImage && (
                       <div className="mb-4 rounded-xl overflow-hidden shadow-lg border border-gray-600">
                           <img src={gameState.scenarioImage} alt="Scenario" className="w-full h-auto object-cover" />
                       </div>
                   )}
                   <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">{t('situation', lang)}</h3>
-                  <MarkdownDisplay content={gameState.scenario || ''} />
+                  <MarkdownDisplay content={displayedScenario} />
+                  {!scenarioRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
               </div>
 
-              <div className="flex-grow flex flex-col space-y-2">
+              {/* Input Area - Fade in when revealed */}
+              <div className={`flex-grow flex flex-col space-y-2 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
                   <label className="text-sm text-tg-hint">{t('submitAction', lang)}</label>
                   <textarea 
-                    className="w-full flex-grow bg-tg-secondaryBg p-4 rounded-xl border border-tg-hint/20 focus:border-tg-button focus:outline-none resize-none"
+                    className="w-full flex-grow bg-tg-secondaryBg p-4 rounded-xl border border-tg-hint/20 focus:border-tg-button focus:outline-none resize-none transition-colors focus:ring-1 focus:ring-tg-button"
                     placeholder={t('placeholderAction', lang)}
                     value={actionInput}
                     onChange={(e) => handleActionInputChange(e.target.value)}
-                    disabled={user?.status === 'ready'}
+                    disabled={!scenarioRevealed || user?.status === 'ready'}
                     maxLength={gameState.settings.charLimit}
                   />
                   <div className="flex justify-between text-xs text-tg-hint px-1">
@@ -865,7 +552,7 @@ const App: React.FC = () => {
                   </div>
               </div>
 
-              <div className="mt-4 pb-4">
+              <div className={`mt-4 pb-4 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                   {user?.status === 'ready' ? (
                       <Button disabled className="bg-green-600 text-white">{t('actionSubmitted', lang)}</Button>
                   ) : (
@@ -877,6 +564,7 @@ const App: React.FC = () => {
           </div>
       );
   }
+
 
   if (gameState.status === GameStatus.JUDGING) {
      return (
