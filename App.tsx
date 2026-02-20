@@ -746,6 +746,40 @@ const App: React.FC = () => {
                           ))}
                       </div>
                   </div>
+
+                  {/* Image Generation Mode */}
+                  <div>
+                      <div className="flex justify-between text-sm mb-2">
+                          <span>{t('imageGenerationMode', lang)}</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                          {(['none', 'scenario', 'full'] as ImageGenerationMode[]).map((mode) => (
+                             <button
+                                key={mode}
+                                onClick={() => handleUpdateSettings('imageGenerationMode', mode)}
+                                disabled={!user?.isCaptain}
+                                className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
+                                    ${gameState.settings.imageGenerationMode === mode
+                                        ? 'bg-tg-button text-white border-transparent'
+                                        : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
+                                    }
+                                    ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
+                                `}
+                             >
+                                 <span>
+                                     {mode === 'none' && t('imgNone', lang)}
+                                     {mode === 'scenario' && t('imgScenario', lang)}
+                                     {mode === 'full' && t('imgFull', lang)}
+                                 </span>
+                                 <span className="text-[8px] opacity-70 normal-case leading-tight max-w-full overflow-hidden text-ellipsis">
+                                     {mode === 'none' && t('imgNoneDesc', lang)}
+                                     {mode === 'scenario' && t('imgScenarioDesc', lang)}
+                                     {mode === 'full' && t('imgFullDesc', lang)}
+                                 </span>
+                             </button>
+                          ))}
+                      </div>
+                  </div>
               </div>
 
               <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">{t('players', lang)}</h3>
