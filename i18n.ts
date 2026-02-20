@@ -88,7 +88,11 @@ export const translations = {
     missingApiKeyDesc: "You must set a Google Gemini API Key in settings (⚙️) to start.",
     cancel: "Cancel",
     save: "Save",
-    settingsTitle: "Settings"
+    settingsTitle: "Settings",
+    api_gemini_key_required: "Gemini API Key (Required)",
+    api_api_navy_key_optional: "API.Navy Key (Optional)",
+    api_get_free_key_at: "Get free key at:",
+    game_starting: "Game is starting..."
   },
   ru: {
     createLobby: "Создать лобби",
@@ -177,7 +181,11 @@ export const translations = {
     missingApiKeyDesc: "Вы должны установить ключ Google Gemini API в настройках (⚙️), чтобы начать.",
     cancel: "Отмена",
     save: "Сохранить",
-    settingsTitle: "Настройки"
+    settingsTitle: "Настройки",
+    api_gemini_key_required: "Gemini API Ключ (Обязательно)",
+    api_api_navy_key_optional: "API.Navy Ключ (Опционально)",
+    api_get_free_key_at: "Получить ключ:",
+    game_starting: "Игра начинается..."
   }
 };
 

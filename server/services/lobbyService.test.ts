@@ -15,6 +15,13 @@ mock.module("@google/genai", () => ({
     Type: {}, Modality: { IMAGE: "IMAGE" }
 }));
 
+// Mock ImageService
+mock.module(join(import.meta.dir, "imageService.ts"), () => ({
+  ImageService: {
+    generateImage: () => Promise.resolve("data:image/png;base64,mockBase64")
+  }
+}));
+
 // Mock local dependencies that import external ones
 // Use absolute path to ensure we intercept
 mock.module(join(import.meta.dir, "geminiService.ts"), () => ({
@@ -36,16 +43,10 @@ mock.module(join(import.meta.dir, "geminiService.ts"), () => ({
 }));
 
 // Mock Socket.IO
-class MockSocket {
-    id: string;
-    constructor(id: string) { this.id = id; }
-    join() {}
-    emit() {}
-}
-
 const mockEmit = mock(() => {});
 mock.module("socket.io", () => ({
   Server: class {
+    constructor() {}
     to() { return { emit: mockEmit }; }
   }
 }));
@@ -135,12 +136,11 @@ describe('LobbyService', () => {
       const host = { ...getHost(), isCaptain: true };
       const code = lobbyService.createLobby(host, getSettings(), 's1');
 
-      // Mock collectKeys to do nothing effectively, so no keys -> error
-      // But startGame is async. We check the transitional state.
-
-      // We can't easily pause execution inside startGame without complex mocking,
-      // but we can verify the end state is WAITING (due to "No keys" error)
-      // instead of stuck in STARTING.
+      // Mock collectKeys to resolve immediately (to avoid 5s timeout)
+      (lobbyService as any).collectKeys = async () => {
+          // Do nothing, so geminiKeys remain empty
+          return;
+      };
 
       await lobbyService.startGame(code, host.id);
 
