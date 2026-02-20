@@ -1,3 +1,5 @@
+import { isTransientError } from "./errorUtils";
+
 export class KeyManager {
   private primaryKey: string;
   private readonly pool: string[];
@@ -15,8 +17,8 @@ export class KeyManager {
     // 1. Try Primary Key First
     try {
       return await operation(this.primaryKey);
-    } catch (error: any) {
-      if (!this.isTransientError(error)) throw error;
+    } catch (error: unknown) {
+      if (!isTransientError(error)) throw error;
       console.warn("[KeyManager] Primary key failed with transient error. Switching to backup pool.");
     }
 
@@ -33,31 +35,24 @@ export class KeyManager {
       // Remove it from the local pool so we don't try it again in this cycle
       currentPool.splice(randomIndex, 1);
 
-      // Backoff: 2^attempt * 1000ms (2s, 4s, 8s...)
-      const delay = Math.pow(2, attemptCount) * 1000;
-      console.log(`[KeyManager] Retrying with backup key in ${delay}ms...`);
+      // Backoff: 2^attempt * 1000ms + Jitter
+      const baseDelay = Math.pow(2, attemptCount) * 1000;
+      const jitter = Math.random() * 1000; // 0-1000ms random jitter
+      const delay = baseDelay + jitter;
+
+      console.log(`[KeyManager] Retrying with backup key in ${Math.round(delay)}ms...`);
 
       await new Promise(resolve => setTimeout(resolve, delay));
 
       try {
         return await operation(key);
-      } catch (error: any) {
-        if (!this.isTransientError(error)) throw error;
+      } catch (error: unknown) {
+        if (!isTransientError(error)) throw error;
         console.warn(`[KeyManager] Backup key failed. ${currentPool.length} keys remaining.`);
         attemptCount++;
       }
     }
 
     throw new Error("All API keys (Primary + Pool) exhausted or failed.");
-  }
-
-  private isTransientError(error: any): boolean {
-    const status = error.status || error.response?.status || error.code;
-    return (
-      status === 503 ||
-      status === 429 ||
-      status === 'UNAVAILABLE' ||
-      (error.message && error.message.includes('overloaded'))
-    );
   }
 }

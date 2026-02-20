@@ -127,8 +127,10 @@ io.on('connection', (socket) => {
 
   // Handle client responding to 'request_keys' event
   socket.on('provide_keys', ({ code, keys }: { code: string, keys: { gemini?: string, navy?: string } }) => {
-      // Validate user identity using socket.telegramUser.id
-      lobbyService.receiveKeys(code, user.id.toString(), keys);
+      // Security Check: Ensure user is actually in the lobby
+      if (lobbyService.isPlayerInLobby(code, user.id.toString())) {
+          lobbyService.receiveKeys(code, user.id.toString(), keys);
+      }
   });
 
   socket.on('start_game', ({ code }: { code: string }) => {

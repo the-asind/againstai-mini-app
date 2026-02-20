@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { GameState, LobbySettings, Player, GameStatus } from '../types';
+import { STORAGE_KEYS } from '../constants';
 
 const URL = import.meta.env.VITE_API_URL || undefined; // undefined = auto-detect host
 
@@ -54,8 +55,8 @@ class SocketServiceImpl {
 
     // Handle key request from server
     this.socket.on('request_keys', () => {
-        const gemini = localStorage.getItem('against_ai_api_key') || undefined;
-        const navy = localStorage.getItem('against_ai_navy_key') || undefined;
+        const gemini = localStorage.getItem(STORAGE_KEYS.API_KEY) || undefined;
+        const navy = localStorage.getItem(STORAGE_KEYS.NAVY_KEY) || undefined;
 
         if (this.currentLobbyCode) {
             this.socket?.emit('provide_keys', {
@@ -78,14 +79,6 @@ class SocketServiceImpl {
       return () => {
           this.errorSubscribers = this.errorSubscribers.filter(s => s !== callback);
       };
-  }
-
-  private notifySubscribers(state: GameState) {
-      this.subscribers.forEach(cb => cb(state));
-  }
-
-  private notifyErrorSubscribers(error: { message: string }) {
-      this.errorSubscribers.forEach(cb => cb(error));
   }
 
   public async validateApiKey(apiKey: string): Promise<boolean> {

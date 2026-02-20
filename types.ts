@@ -23,6 +23,7 @@ export enum GameStatus {
   HOME = 'HOME',
   LOBBY_SETUP = 'LOBBY_SETUP',
   LOBBY_WAITING = 'LOBBY_WAITING',
+  LOBBY_STARTING = 'LOBBY_STARTING', // Added atomic start state
   SCENARIO_GENERATION = 'SCENARIO_GENERATION',
   PLAYER_INPUT = 'PLAYER_INPUT',
   JUDGING = 'JUDGING',
@@ -43,7 +44,7 @@ export interface Player {
   status: 'alive' | 'dead' | 'waiting' | 'ready';
   actionText?: string;
   isOnline: boolean;
-  keyCount: number; // 0, 1, or 2
+  keyCount: 0 | 1 | 2; // Stricter type: 0, 1, or 2
 }
 
 export type AIModelLevel = 'economy' | 'balanced' | 'premium';

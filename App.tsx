@@ -1,28 +1,19 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel, ImageGenerationMode } from './types';
 import { translations, t } from './i18n';
-import { DEFAULT_SETTINGS, MIN_TIME, MAX_TIME, MIN_CHARS, MAX_CHARS } from './constants';
+import { DEFAULT_SETTINGS, MIN_TIME, MAX_TIME, MIN_CHARS, MAX_CHARS, STORAGE_KEYS } from './constants';
 import { SocketService } from './services/socketService';
 import { Button } from './components/Button';
 import { Input } from './components/Input';
 import { CodeInput } from './components/CodeInput';
 import { MarkdownDisplay } from './components/MarkdownDisplay';
 
-// Storage Keys
-const STORAGE_KEYS = {
-    API_KEY: 'against_ai_api_key',
-    NAVY_KEY: 'against_ai_navy_key',
-    NICKNAME: 'against_ai_nickname',
-    SETTINGS: 'against_ai_lobby_settings',
-    LANG: 'against_ai_ui_lang'
-};
-
 // Helper to count keys
-const getKeyCount = (): number => {
+const getKeyCount = (): 0 | 1 | 2 => {
     let count = 0;
     if (localStorage.getItem(STORAGE_KEYS.API_KEY)) count++;
     if (localStorage.getItem(STORAGE_KEYS.NAVY_KEY)) count++;
-    return count;
+    return count as 0 | 1 | 2;
 };
 
 // Extracted Components
@@ -70,7 +61,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
 
             <div className="space-y-2">
-                 <label className="text-xs text-tg-hint uppercase font-bold ml-1">Gemini API Key (Required)</label>
+                 <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('api_gemini_key_required', lang) || "Gemini API Key (Required)"}</label>
                  <Input
                     value={settingsApiKey}
                     onChange={(e) => setSettingsApiKey(e.target.value)}
@@ -84,7 +75,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
 
             <div className="space-y-2">
-                 <label className="text-xs text-tg-hint uppercase font-bold ml-1">API.NAVY Key (Optional)</label>
+                 <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('api_api_navy_key_optional', lang) || "API.NAVY Key (Optional)"}</label>
                  <Input
                     value={settingsNavyApiKey}
                     onChange={(e) => setSettingsNavyApiKey(e.target.value)}
@@ -93,7 +84,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                     autoComplete="off"
                  />
                  <p className="text-[10px] text-tg-hint">
-                    Get free key at <a href="https://api.navy" target="_blank" className="underline text-tg-link">api.navy</a>.
+                    {t('api_get_free_key_at', lang) || "Get free key at"} <a href="https://api.navy" target="_blank" className="underline text-tg-link">api.navy</a>.
                  </p>
             </div>
 
@@ -357,7 +348,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateSettings = (key: keyof LobbySettings, value: any) => {
+  const handleUpdateSettings = <K extends keyof LobbySettings>(key: K, value: LobbySettings[K]) => {
       // 1. Update Backend
       if (gameState.lobbyCode) {
          SocketService.updateSettings(gameState.lobbyCode, { [key]: value });
@@ -543,7 +534,7 @@ const App: React.FC = () => {
     );
   }
 
-  if (gameState.status === GameStatus.LOBBY_WAITING || gameState.status === GameStatus.LOBBY_SETUP) {
+  if (gameState.status === GameStatus.LOBBY_WAITING || gameState.status === GameStatus.LOBBY_SETUP || gameState.status === GameStatus.LOBBY_STARTING) {
       return (
           <div className="min-h-screen flex flex-col p-4 relative">
               <Toast toast={toast} />
@@ -692,10 +683,10 @@ const App: React.FC = () => {
                       <div key={p.id} className={`flex items-center p-3 bg-tg-secondaryBg rounded-lg ${!p.isOnline ? 'opacity-50' : ''}`}>
                           <div className={`w-3 h-3 rounded-full mr-3 ${p.status === 'ready' ? 'bg-green-500' : 'bg-gray-500'}`} />
                           <span className="font-medium">{p.name}</span>
-                          {/* API Key Indicators */}
+                          {/* API Key Indicators - explicit comparison */}
                           <div className="ml-2 flex gap-1">
-                              {p.keyCount && p.keyCount >= 1 ? <span className="text-green-500 text-xs">✓</span> : null}
-                              {p.keyCount && p.keyCount >= 2 ? <span className="text-green-500 text-xs">✓</span> : null}
+                              {p.keyCount >= 1 ? <span className="text-green-500 text-xs">✓</span> : null}
+                              {p.keyCount >= 2 ? <span className="text-green-500 text-xs">✓</span> : null}
                           </div>
                           {!p.isOnline && <span className="ml-2 text-xs text-red-500 font-bold">[OFFLINE]</span>}
                           {p.isCaptain && <span className="ml-auto text-xs text-yellow-500">👑 Captain</span>}
@@ -710,10 +701,12 @@ const App: React.FC = () => {
                         disabled={gameState.players.length < 2 || !localStorage.getItem(STORAGE_KEYS.API_KEY)}
                         className={!localStorage.getItem(STORAGE_KEYS.API_KEY) ? 'opacity-50' : ''}
                      >
-                        {t('startGame', lang)}
+                        {gameState.status === GameStatus.LOBBY_STARTING ? t('loading', lang) : t('startGame', lang)}
                      </Button>
                  ) : (
-                     <p className="text-center text-tg-hint animate-pulse">{t('waitingForPlayers', lang)}</p>
+                     <p className="text-center text-tg-hint animate-pulse">
+                         {gameState.status === GameStatus.LOBBY_STARTING ? t('game_starting', lang) : t('waitingForPlayers', lang)}
+                     </p>
                  )}
                  <Button variant="secondary" onClick={handleShare}>
                      {t('shareInvite', lang)}

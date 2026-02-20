@@ -6,6 +6,7 @@ import { ABSTRACT_ROLES } from "../archetypes/roles";
 import { ABSTRACT_INCIDENTS } from "../archetypes/incidents";
 import { ABSTRACT_TWISTS } from "../archetypes/twists";
 import { KeyManager } from "../utils/keyManager";
+import { isTransientError } from "../utils/errorUtils";
 
 // We rely on the global fetch patch (initialized in server/index.ts) to handle proxying
 const getClient = (apiKey: string) => new GoogleGenAI({ apiKey: apiKey.trim() });
@@ -24,15 +25,8 @@ const retryWithBackoffSingle = async <T>(
 ): Promise<T> => {
     try {
         return await operation();
-    } catch (error: any) {
-        const status = error.status || error.response?.status || error.code;
-        const isTransient =
-            status === 503 ||
-            status === 429 ||
-            status === 'UNAVAILABLE' ||
-            (error.message && error.message.includes('overloaded'));
-
-        if (retries > 0 && isTransient) {
+    } catch (error: unknown) {
+        if (retries > 0 && isTransientError(error)) {
             await new Promise(resolve => setTimeout(resolve, delay));
             return retryWithBackoffSingle(operation, retries - 1, delay * 2);
         }
@@ -298,7 +292,7 @@ export const GeminiService = {
     try {
         return await keyManager.executeWithRetry(async (apiKey) => {
             const ai = getClient(apiKey);
-            const modelName = 'gemini-2.5-flash-image';
+            const modelName = CONFIG.MODELS.IMAGE;
 
             console.log(`[Gemini Request] Image Gen Model: ${modelName}`);
 
