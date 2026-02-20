@@ -319,7 +319,9 @@ const App: React.FC = () => {
           }
 
           const baseSpeed = 30; // ms per char
-          const currentSpeed = baseSpeed / scenarioRevealSpeed;
+          // Clamp speed to prevent 0ms or negative timeout
+          // Min timeout 5ms
+          const currentSpeed = Math.max(baseSpeed / scenarioRevealSpeed, 5);
 
           const timer = setTimeout(() => {
               setDisplayedScenario(fullText.slice(0, displayedScenario.length + 1));
@@ -357,6 +359,25 @@ const App: React.FC = () => {
   // -- Handlers --
 
   const handleScenarioTap = () => {
+      if (scenarioRevealed) return;
+      if (!user?.isCaptain) return;
+
+      scenarioTapCountRef.current += 1;
+
+      // Skip threshold: 9 taps (3 triple-taps)
+      if (scenarioTapCountRef.current >= 9) {
+           setScenarioRevealed(true);
+           setDisplayedScenario(gameState.scenario || "");
+           triggerHaptic("rigid"); // "Heavy" haptic
+           scenarioTapCountRef.current = 0;
+           return;
+      }
+
+      if (scenarioTapCountRef.current % 3 === 0) {
+          setScenarioRevealSpeed(prev => prev * 1.5);
+          triggerHaptic("medium");
+      }
+  };
       if (scenarioRevealed) return;
       if (!user?.isCaptain) return;
 
@@ -882,7 +903,8 @@ const App: React.FC = () => {
       const totalTime = gameState.settings.timeLimitSeconds;
       const timeLeft = timeLeftDisplay;
 
-      // Calculate Low Time Thresholds (max 60s/10% and max 30s/5%)
+      // Calculate Low Time Thresholds: 10% or 60s (whichever is smaller), 5% or 30s (whichever is smaller)
+      // This caps the visual effect duration for long games while preserving percentage for short games.
       const isLowTime = timeLeft <= Math.min(60, totalTime * 0.1);
       const isCriticalTime = timeLeft <= Math.min(30, totalTime * 0.05);
       const isVeryCritical = timeLeft <= 3;
@@ -911,7 +933,7 @@ const App: React.FC = () => {
               </div>
 
               {/* Input Area - Fade in when revealed */}
-              <div className={`flex-grow flex flex-col space-y-2 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+              <div className={`flex-grow flex flex-col space-y-2 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                   <label className="text-sm text-tg-hint">{t('submitAction', lang)}</label>
                   <textarea 
                     className="w-full flex-grow bg-tg-secondaryBg p-4 rounded-xl border border-tg-hint/20 focus:border-tg-button focus:outline-none resize-none transition-colors focus:ring-1 focus:ring-tg-button"
