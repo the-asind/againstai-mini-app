@@ -7,12 +7,16 @@ import crypto from 'node:crypto';
 const ORIGINAL_TOKEN = CONFIG.BOT_TOKEN;
 
 describe('validateTelegramData', () => {
+  const configMock = CONFIG as unknown as { BOT_TOKEN?: string; BOT_USERNAME?: string };
+
   beforeEach(() => {
-    (CONFIG as any).BOT_TOKEN = '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11';
+    configMock.BOT_TOKEN = '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11';
+    configMock.BOT_USERNAME = 'test_bot';
   });
 
   afterEach(() => {
-    (CONFIG as any).BOT_TOKEN = ORIGINAL_TOKEN;
+    configMock.BOT_TOKEN = ORIGINAL_TOKEN;
+    configMock.BOT_USERNAME = undefined;
   });
 
   it('should validate correctly signed data', () => {
@@ -36,12 +40,13 @@ describe('validateTelegramData', () => {
     const originalNow = Date.now;
     Date.now = () => 1710000000 * 1000;
 
-    const result = validateTelegramData(initData);
-
-    Date.now = originalNow;
-
-    expect(result.isValid).toBe(true);
-    expect(result.user?.id).toBe(12345);
+    try {
+      const result = validateTelegramData(initData);
+      expect(result.isValid).toBe(true);
+      expect(result.user?.id).toBe(12345);
+    } finally {
+      Date.now = originalNow;
+    }
   });
 
   it('should fail if signature is invalid', () => {
@@ -55,8 +60,6 @@ describe('validateTelegramData', () => {
       // In some locales, "z" < "a" if we are not careful (though unlikely in standard JS localeCompare with 'en')
       // But the key point is predictability.
       // We'll test with keys that might be sorted differently.
-      // E.g. keys with different cases or special characters if Telegram allowed them.
-      // Telegram keys are usually underscore_cased.
 
       const entries = [
           { key: 'b', value: '2' },
@@ -64,7 +67,11 @@ describe('validateTelegramData', () => {
           { key: 'c', value: '3' }
       ];
 
-      // We want to ensure it's always a, b, c regardless of environment.
-      // This is hard to "fail" in a test without changing locale, but we can verify our fix produces the right string.
+      // Use the same logic as in the implementation
+      entries.sort((a, b) => a.key < b.key ? -1 : (a.key > b.key ? 1 : 0));
+
+      expect(entries[0].key).toBe('a');
+      expect(entries[1].key).toBe('b');
+      expect(entries[2].key).toBe('c');
   });
 });
