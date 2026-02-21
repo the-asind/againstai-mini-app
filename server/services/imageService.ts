@@ -23,7 +23,7 @@ export const ImageService = {
                 size: "16:9" as any, // Cast to any because standard OpenAI types might not include "16:9"
             });
 
-            const imageUrl = response.data[0].url;
+            const imageUrl = response.data?.[0]?.url;
             if (!imageUrl) {
                 throw new Error("No image URL returned from api.navy");
             }
