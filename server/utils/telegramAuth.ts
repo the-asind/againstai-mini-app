@@ -47,7 +47,7 @@ export const validateTelegramData = (initData: string): { isValid: boolean; user
   });
 
   // Sort by key
-  entries.sort((a, b) => a.key.localeCompare(b.key));
+  entries.sort((a, b) => a.key < b.key ? -1 : (a.key > b.key ? 1 : 0));
 
   // Construct data-check-string
   const dataCheckString = entries.map(({key, value}) => `${key}=${value}`).join('\n');
@@ -65,6 +65,10 @@ export const validateTelegramData = (initData: string): { isValid: boolean; user
     .digest('hex');
 
   // Constant time comparison to prevent timing attacks
+  if (calculatedHash.length !== hash.length) {
+    return { isValid: false, error: "Signature verification failed" };
+  }
+
   const isValid = crypto.timingSafeEqual(
       Buffer.from(calculatedHash),
       Buffer.from(hash)
