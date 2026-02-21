@@ -26,6 +26,15 @@
                 '0%': { opacity: '0' },
                 '100%': { opacity: '1' },
               },
+              shake: {
+                '0%, 100%': { transform: 'translateX(0)' },
+                '25%': { transform: 'translateX(-2px) translateY(1px)' },
+                '75%': { transform: 'translateX(2px) translateY(-1px)' },
+              },
+              pulseRed: {
+                '0%, 100%': { backgroundColor: 'transparent' },
+                '50%': { backgroundColor: 'rgba(220, 38, 38, 0.2)' },
+              },
               slideUp: {
                 '0%': { transform: 'translateY(10px)', opacity: '0' },
                 '100%': { transform: 'translateY(0)', opacity: '1' },
@@ -35,6 +44,8 @@
               'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
               'fade-in': 'fadeIn 0.5s ease-out forwards',
               'slide-up': 'slideUp 0.5s ease-out forwards',
+              'shake': 'shake 0.2s ease-in-out infinite',
+              'pulse-red': 'pulseRed 2s ease-in-out infinite',
             }
           }
         }

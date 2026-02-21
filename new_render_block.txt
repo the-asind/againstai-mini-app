@@ -1,0 +1,61 @@
+  if (gameState.status === GameStatus.PLAYER_INPUT) {
+      const totalTime = gameState.settings.timeLimitSeconds;
+      const timeLeft = timeLeftDisplay;
+
+      // Calculate Low Time Thresholds (max 60s/10% and max 30s/5%)
+      const isLowTime = timeLeft <= Math.min(60, totalTime * 0.1);
+      const isCriticalTime = timeLeft <= Math.min(30, totalTime * 0.05);
+      const isVeryCritical = timeLeft <= 3;
+
+      return (
+          <div className={`min-h-screen flex flex-col p-4 relative transition-colors duration-500 ${isCriticalTime ? 'bg-red-900/20 animate-pulse-red' : ''} ${isVeryCritical ? 'animate-shake' : ''}`}>
+
+              {/* Timer - Only show when revealed */}
+              <div className={`flex justify-between items-center mb-4 bg-tg-secondaryBg p-3 rounded-lg sticky top-0 z-10 shadow-lg transition-all duration-300 ${scenarioRevealed ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'} ${isLowTime ? 'animate-shake' : ''}`}>
+                  <span className={`text-sm font-bold ${isCriticalTime ? 'text-red-500 animate-pulse' : 'text-tg-hint'}`}>{t('timeLeft', lang)}</span>
+                  <span className={`text-2xl font-mono font-bold ${isCriticalTime ? 'text-red-600 animate-pulse' : 'text-tg-text'}`}>{timeLeftDisplay}s</span>
+              </div>
+
+              <div
+                  className="bg-gradient-to-b from-gray-900 to-gray-800 p-5 rounded-2xl border border-gray-700 shadow-xl mb-6 transition-all active:scale-[0.98]"
+                  onClick={handleScenarioTap}
+              >
+                  {gameState.scenarioImage && (
+                      <div className="mb-4 rounded-xl overflow-hidden shadow-lg border border-gray-600">
+                          <img src={gameState.scenarioImage} alt="Scenario" className="w-full h-auto object-cover" />
+                      </div>
+                  )}
+                  <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">{t('situation', lang)}</h3>
+                  <MarkdownDisplay content={displayedScenario} />
+                  {!scenarioRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
+              </div>
+
+              {/* Input Area - Fade in when revealed */}
+              <div className={`flex-grow flex flex-col space-y-2 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+                  <label className="text-sm text-tg-hint">{t('submitAction', lang)}</label>
+                  <textarea
+                    className="w-full flex-grow bg-tg-secondaryBg p-4 rounded-xl border border-tg-hint/20 focus:border-tg-button focus:outline-none resize-none transition-colors focus:ring-1 focus:ring-tg-button"
+                    placeholder={t('placeholderAction', lang)}
+                    value={actionInput}
+                    onChange={(e) => handleActionInputChange(e.target.value)}
+                    disabled={!scenarioRevealed || user?.status === 'ready'}
+                    maxLength={gameState.settings.charLimit}
+                  />
+                  <div className="flex justify-between text-xs text-tg-hint px-1">
+                      <span>{actionInput.length} / {gameState.settings.charLimit}</span>
+                      {errorMsg && <span className="text-red-500 font-bold">{errorMsg}</span>}
+                  </div>
+              </div>
+
+              <div className={`mt-4 pb-4 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                  {user?.status === 'ready' ? (
+                      <Button disabled className="bg-green-600 text-white">{t('actionSubmitted', lang)}</Button>
+                  ) : (
+                      <Button onClick={() => handleSubmitAction(false)} isLoading={loading}>
+                          {t('submit', lang)}
+                      </Button>
+                  )}
+              </div>
+          </div>
+      );
+  }

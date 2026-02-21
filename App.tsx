@@ -169,6 +169,11 @@ const App: React.FC = () => {
   const [textRevealed, setTextRevealed] = useState(false);
   const [revealSpeedMultiplier, setRevealSpeedMultiplier] = useState(1);
   const tapCountRef = useRef(0);
+  // Scenario Reveal State
+  const [displayedScenario, setDisplayedScenario] = useState("");
+  const [scenarioRevealed, setScenarioRevealed] = useState(false);
+  const [scenarioRevealSpeed, setScenarioRevealSpeed] = useState(1);
+  const scenarioTapCountRef = useRef(0);
 
   // Helper for Haptics to avoid v6.0 crash
   const triggerHaptic = (type: 'error' | 'success' | 'warning' | 'medium') => {
@@ -281,10 +286,16 @@ const App: React.FC = () => {
   // Reset text reveal on new round/state change
   useEffect(() => {
      if (gameState.status !== GameStatus.RESULTS) {
-         setDisplayedText('');
+         setDisplayedText("");
          setTextRevealed(false);
          setRevealSpeedMultiplier(1);
          tapCountRef.current = 0;
+     }
+     if (gameState.status !== GameStatus.PLAYER_INPUT) {
+         setDisplayedScenario("");
+         setScenarioRevealed(false);
+         setScenarioRevealSpeed(1);
+         scenarioTapCountRef.current = 0;
      }
   }, [gameState.status]);
 
@@ -297,6 +308,28 @@ const App: React.FC = () => {
           }
       }
   }, [gameState.status, gameState.resultsRevealed, gameState.roundResult, textRevealed]);
+
+  // Scenario Typewriter Effect
+  useEffect(() => {
+      if (gameState.status === GameStatus.PLAYER_INPUT && gameState.scenario) {
+          const fullText = gameState.scenario;
+          if (scenarioRevealed || displayedScenario.length >= fullText.length) {
+              if (!scenarioRevealed) setScenarioRevealed(true);
+              return;
+          }
+
+          const baseSpeed = 30; // ms per char
+          // Clamp speed to prevent 0ms or negative timeout
+          // Min timeout 5ms
+          const currentSpeed = Math.max(baseSpeed / scenarioRevealSpeed, 5);
+
+          const timer = setTimeout(() => {
+              setDisplayedScenario(fullText.slice(0, displayedScenario.length + 1));
+          }, currentSpeed);
+
+          return () => clearTimeout(timer);
+      }
+  }, [gameState.status, gameState.scenario, displayedScenario, scenarioRevealed, scenarioRevealSpeed]);
 
   // Typewriter Effect
   useEffect(() => {
@@ -324,6 +357,36 @@ const App: React.FC = () => {
 
 
   // -- Handlers --
+
+  const handleScenarioTap = () => {
+      if (scenarioRevealed) return;
+      if (!user?.isCaptain) return;
+
+      scenarioTapCountRef.current += 1;
+
+      // Skip threshold: 9 taps (3 triple-taps)
+      if (scenarioTapCountRef.current >= 9) {
+           setScenarioRevealed(true);
+           setDisplayedScenario(gameState.scenario || "");
+           triggerHaptic("rigid"); // "Heavy" haptic
+           scenarioTapCountRef.current = 0;
+           return;
+      }
+
+      if (scenarioTapCountRef.current % 3 === 0) {
+          setScenarioRevealSpeed(prev => prev * 1.5);
+          triggerHaptic("medium");
+      }
+  };
+      if (scenarioRevealed) return;
+      if (!user?.isCaptain) return;
+
+      scenarioTapCountRef.current += 1;
+      if (scenarioTapCountRef.current % 3 === 0) {
+          setScenarioRevealSpeed(prev => prev * 1.5);
+          triggerHaptic("medium");
+      }
+  };
 
   const handleResultsTap = () => {
       if (textRevealed || gameState.resultsRevealed) return;
@@ -465,7 +528,12 @@ const App: React.FC = () => {
       interval = setInterval(() => {
         timeLeftRef.current -= 1;
         setTimeLeftDisplay(timeLeftRef.current);
-        
+
+        // Haptics for last 3 seconds
+        if (timeLeftRef.current <= 3 && timeLeftRef.current > 0) {
+             triggerHaptic('warning');
+        }
+
         if (timeLeftRef.current <= 0) {
            clearInterval(interval);
            // Auto-submit logic is handled by server timeout.
@@ -483,7 +551,7 @@ const App: React.FC = () => {
 
   const handleSubmitAction = async (force = false) => {
     if (!user || !gameState.lobbyCode) return;
-    
+
     // Use Ref for latest input
     let currentInput = actionInputRef.current.trim();
 
@@ -497,7 +565,7 @@ const App: React.FC = () => {
         }
         currentInput += t('timeOutNote', lang);
     }
-    
+
     // Server performs cheat detection now
     SocketService.submitAction(gameState.lobbyCode, currentInput);
 
@@ -700,14 +768,14 @@ const App: React.FC = () => {
                           <span>{t('storyLanguage', lang)}</span>
                       </div>
                       <div className="flex gap-2 p-1 bg-tg-bg rounded-lg">
-                          <button 
+                          <button
                             onClick={() => handleUpdateSettings('storyLanguage', 'en')}
                             disabled={!user?.isCaptain}
                             className={`flex-1 py-1 text-sm rounded-md transition-colors ${gameState.settings.storyLanguage === 'en' ? 'bg-tg-button text-white' : 'text-tg-hint opacity-70'}`}
                           >
                             English
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleUpdateSettings('storyLanguage', 'ru')}
                             disabled={!user?.isCaptain}
                             className={`flex-1 py-1 text-sm rounded-md transition-colors ${gameState.settings.storyLanguage === 'ru' ? 'bg-tg-button text-white' : 'text-tg-hint opacity-70'}`}
@@ -832,31 +900,47 @@ const App: React.FC = () => {
   }
 
   if (gameState.status === GameStatus.PLAYER_INPUT) {
+      const totalTime = gameState.settings.timeLimitSeconds;
+      const timeLeft = timeLeftDisplay;
+
+      // Calculate Low Time Thresholds: 10% or 60s (whichever is smaller), 5% or 30s (whichever is smaller)
+      // This caps the visual effect duration for long games while preserving percentage for short games.
+      const isLowTime = timeLeft <= Math.min(60, totalTime * 0.1);
+      const isCriticalTime = timeLeft <= Math.min(30, totalTime * 0.05);
+      const isVeryCritical = timeLeft <= 3;
+
       return (
-          <div className="min-h-screen flex flex-col p-4">
-              <div className="flex justify-between items-center mb-4 bg-tg-secondaryBg p-3 rounded-lg sticky top-0 z-10 shadow-lg">
-                  <span className="text-sm font-bold text-red-400">{t('timeLeft', lang)}</span>
-                  <span className="text-2xl font-mono font-bold text-red-500">{timeLeftDisplay}s</span>
+          <div className={`min-h-screen flex flex-col p-4 relative transition-colors duration-500 ${isCriticalTime ? 'bg-red-900/20 animate-pulse-red' : ''} ${isVeryCritical ? 'animate-shake' : ''}`}>
+
+              {/* Timer - Only show when revealed */}
+              <div className={`flex justify-between items-center mb-4 bg-tg-secondaryBg p-3 rounded-lg sticky top-0 z-10 shadow-lg transition-all duration-300 ${scenarioRevealed ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'} ${isLowTime ? 'animate-shake' : ''}`}>
+                  <span className={`text-sm font-bold ${isCriticalTime ? 'text-red-500 animate-pulse' : 'text-tg-hint'}`}>{t('timeLeft', lang)}</span>
+                  <span className={`text-2xl font-mono font-bold ${isCriticalTime ? 'text-red-600 animate-pulse' : 'text-tg-text'}`}>{timeLeftDisplay}s</span>
               </div>
 
-              <div className="bg-gradient-to-b from-gray-900 to-gray-800 p-5 rounded-2xl border border-gray-700 shadow-xl mb-6">
+              <div
+                  className="bg-gradient-to-b from-gray-900 to-gray-800 p-5 rounded-2xl border border-gray-700 shadow-xl mb-6 transition-all active:scale-[0.98]"
+                  onClick={handleScenarioTap}
+              >
                   {gameState.scenarioImage && (
                       <div className="mb-4 rounded-xl overflow-hidden shadow-lg border border-gray-600">
                           <img src={gameState.scenarioImage} alt="Scenario" className="w-full h-auto object-cover" />
                       </div>
                   )}
                   <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">{t('situation', lang)}</h3>
-                  <MarkdownDisplay content={gameState.scenario || ''} />
+                  <MarkdownDisplay content={displayedScenario} />
+                  {!scenarioRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
               </div>
 
-              <div className="flex-grow flex flex-col space-y-2">
+              {/* Input Area - Fade in when revealed */}
+              <div className={`flex-grow flex flex-col space-y-2 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                   <label className="text-sm text-tg-hint">{t('submitAction', lang)}</label>
                   <textarea 
-                    className="w-full flex-grow bg-tg-secondaryBg p-4 rounded-xl border border-tg-hint/20 focus:border-tg-button focus:outline-none resize-none"
+                    className="w-full flex-grow bg-tg-secondaryBg p-4 rounded-xl border border-tg-hint/20 focus:border-tg-button focus:outline-none resize-none transition-colors focus:ring-1 focus:ring-tg-button"
                     placeholder={t('placeholderAction', lang)}
                     value={actionInput}
                     onChange={(e) => handleActionInputChange(e.target.value)}
-                    disabled={user?.status === 'ready'}
+                    disabled={!scenarioRevealed || user?.status === 'ready'}
                     maxLength={gameState.settings.charLimit}
                   />
                   <div className="flex justify-between text-xs text-tg-hint px-1">
@@ -865,7 +949,7 @@ const App: React.FC = () => {
                   </div>
               </div>
 
-              <div className="mt-4 pb-4">
+              <div className={`mt-4 pb-4 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                   {user?.status === 'ready' ? (
                       <Button disabled className="bg-green-600 text-white">{t('actionSubmitted', lang)}</Button>
                   ) : (
