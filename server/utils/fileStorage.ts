@@ -3,7 +3,6 @@ import path from 'path';
 import crypto from 'crypto';
 
 const GENERATED_DIR = path.join(process.cwd(), 'public', 'generated');
-const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours retention
 
 export async function saveImage(base64Data: string): Promise<string> {
@@ -40,7 +39,23 @@ export async function saveImage(base64Data: string): Promise<string> {
     }
 }
 
-export async function cleanupOldImages() {
+export async function saveAudio(buffer: Buffer): Promise<string> {
+    try {
+        await fs.mkdir(GENERATED_DIR, { recursive: true });
+        
+        const filename = `${Date.now()}_${crypto.randomBytes(8).toString('hex')}.mp3`;
+        const filepath = path.join(GENERATED_DIR, filename);
+
+        await fs.writeFile(filepath, buffer);
+
+        return `/generated/${filename}`;
+    } catch (error) {
+        console.error("Failed to save audio:", error);
+        throw error;
+    }
+}
+
+export async function cleanupOldFiles() {
     try {
         const files = await fs.readdir(GENERATED_DIR);
         const now = Date.now();
@@ -59,12 +74,12 @@ export async function cleanupOldImages() {
             }
         }
         if (deletedCount > 0) {
-            console.log(`[ImageCleanup] Removed ${deletedCount} old images.`);
+            console.log(`[FileCleanup] Removed ${deletedCount} old files.`);
         }
     } catch (error) {
         // Directory might not exist yet, which is fine
         if ((error as any).code !== 'ENOENT') {
-            console.error("Image cleanup failed:", error);
+            console.error("File cleanup failed:", error);
         }
     }
 }

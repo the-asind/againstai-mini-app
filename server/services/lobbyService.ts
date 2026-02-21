@@ -2,8 +2,9 @@ import { Server } from 'socket.io';
 import { GameState, GameStatus, LobbySettings, Player, ImageGenerationMode, ScenarioType, GameMode, RoundResult, Language, AIModelLevel, ScenarioResponse } from '../../types';
 import { GeminiService } from './geminiService';
 import { ImageService } from './imageService';
+import { VoiceService } from './voiceService';
 import { KeyManager } from '../utils/keyManager';
-import { saveImage } from '../utils/imageStorage';
+import { saveImage } from '../utils/fileStorage';
 import { CONFIG } from '../config';
 
 interface Lobby {
@@ -13,6 +14,7 @@ interface Lobby {
   settings: LobbySettings;
   scenario: ScenarioResponse | null;
   scenarioImage?: string;
+  scenarioAudio?: string;
   roundResult?: RoundResult;
   geminiKeys: string[];
   navyKeys: string[];
@@ -303,6 +305,19 @@ export class LobbyService {
             }
         }
 
+        // Voice Generation (SCENARIO)
+        if (lobby.settings.voiceoverScenario) {
+            if (lobby.navyKeys.length > 0) {
+                 const navyKeyManager = new KeyManager(lobby.navyKeys[0], lobby.navyKeys.slice(1));
+                 const voiceUrl = await VoiceService.generateVoice(navyKeyManager, scenario.scenario_text);
+                 if (voiceUrl) {
+                     lobby.scenarioAudio = voiceUrl;
+                 }
+            } else {
+                 console.warn("Scenario Voice requested but no Navy keys available.");
+            }
+        }
+
         this.startRound(code);
 
     } catch (e) {
@@ -446,6 +461,19 @@ export class LobbyService {
              result.image = lobby.scenarioImage;
          }
 
+         // Voice Generation (RESULTS)
+         if (lobby.settings.voiceoverResults) {
+             if (lobby.navyKeys.length > 0) {
+                 const navyKeyManager = new KeyManager(lobby.navyKeys[0], lobby.navyKeys.slice(1));
+                 const voiceUrl = await VoiceService.generateVoice(navyKeyManager, result.story);
+                 if (voiceUrl) {
+                     result.audio = voiceUrl;
+                 }
+             } else {
+                 console.warn("Result Voice requested but no Navy keys available.");
+             }
+         }
+
          lobby.roundResult = result;
          lobby.status = GameStatus.RESULTS;
          lobby.resultsRevealed = false; // Ensure it starts hidden
@@ -485,6 +513,7 @@ export class LobbyService {
       lobby.status = GameStatus.LOBBY_WAITING;
       lobby.scenario = null;
       lobby.scenarioImage = undefined;
+      lobby.scenarioAudio = undefined;
       lobby.roundResult = undefined;
       lobby.geminiKeys = [];
       lobby.navyKeys = [];
@@ -509,6 +538,7 @@ export class LobbyService {
             settings: lobby.settings,
             scenario: lobby.scenario ? lobby.scenario.scenario_text : null,
             scenarioImage: lobby.scenarioImage,
+            scenarioAudio: lobby.scenarioAudio,
             roundResult: lobby.roundResult,
             resultsRevealed: lobby.resultsRevealed
             // geminiKeys and navyKeys are EXCLUDED

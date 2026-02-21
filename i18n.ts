@@ -92,7 +92,10 @@ export const translations = {
     api_gemini_key_required: "Gemini API Key (Required)",
     api_api_navy_key_optional: "API.Navy Key (Optional)",
     api_get_free_key_at: "Get free key at:",
-    game_starting: "Game is starting..."
+    game_starting: "Game is starting...",
+    voiceoverScenario: "Voiceover Scenario",
+    voiceoverResults: "Voiceover Results",
+    expensive: "Expensive!"
   },
   ru: {
     createLobby: "Создать лобби",
@@ -185,7 +188,10 @@ export const translations = {
     api_gemini_key_required: "Gemini API Ключ (Обязательно)",
     api_api_navy_key_optional: "API.Navy Ключ (Опционально)",
     api_get_free_key_at: "Получить ключ:",
-    game_starting: "Игра начинается..."
+    game_starting: "Игра начинается...",
+    voiceoverScenario: "Озвучка Сценария",
+    voiceoverResults: "Озвучка Результатов",
+    expensive: "Дорого!"
   }
 };
 

@@ -5,7 +5,9 @@ export const DEFAULT_SETTINGS = {
     scenarioType: 'any',
     storyLanguage: 'en',
     aiModelLevel: 'balanced',
-    imageGenerationMode: 'none'
+    imageGenerationMode: 'none',
+    voiceoverScenario: false,
+    voiceoverResults: false
 };
 
 export const MIN_TIME = 30;

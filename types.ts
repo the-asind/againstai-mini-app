@@ -58,6 +58,8 @@ export interface LobbySettings {
   storyLanguage: Language | null; // The language the AI generates the story in. Null = not selected.
   aiModelLevel: AIModelLevel;
   imageGenerationMode: ImageGenerationMode;
+  voiceoverScenario: boolean;
+  voiceoverResults: boolean;
 }
 
 // Internal Server State (Has secrets)
@@ -68,6 +70,7 @@ export interface ServerGameState {
   settings: LobbySettings;
   scenario: ScenarioResponse | null; // Full object with secrets
   scenarioImage?: string;
+  scenarioAudio?: string;
   roundResult?: RoundResult;
   geminiKeys: string[];
   navyKeys: string[];
@@ -82,6 +85,7 @@ export interface GameState {
   settings: LobbySettings;
   scenario: string | null; // Just the text!
   scenarioImage?: string;
+  scenarioAudio?: string;
   roundResult?: RoundResult;
   resultsRevealed: boolean;
 }
@@ -91,6 +95,7 @@ export interface RoundResult {
   survivors: string[]; // IDs of survivors
   deaths: { playerId: string; reason: string }[];
   image?: string; // Optional generated image for results
+  audio?: string; // Optional generated audio for results
 }
 
 // Telegram WebApp Types (Partial)

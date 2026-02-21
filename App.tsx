@@ -799,6 +799,46 @@ const App: React.FC = () => {
                   {/* Image Generation Mode */}
                   <div>
                       <div className="flex justify-between text-sm mb-2">
+                  {/* Voiceover Settings */}
+                  <div>
+                      <div className="flex justify-between text-sm mb-2">
+                          <span>Voiceover (API.NAVY)</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mb-4">
+                           {/* Scenario Voiceover */}
+                           <button
+                              onClick={() => handleUpdateSettings('voiceoverScenario', !gameState.settings.voiceoverScenario)}
+                              disabled={!user?.isCaptain}
+                              className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
+                                  ${gameState.settings.voiceoverScenario
+                                      ? 'bg-tg-button text-white border-transparent'
+                                      : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
+                                  }
+                                  ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : '}
+                              `}
+                           >
+                               <span>{t('voiceoverScenario', lang)}</span>
+                               {gameState.settings.voiceoverScenario && <span className="text-[8px] text-yellow-300 font-bold">{t('expensive', lang)}</span>}
+                           </button>
+
+                           {/* Results Voiceover */}
+                           <button
+                              onClick={() => handleUpdateSettings('voiceoverResults', !gameState.settings.voiceoverResults)}
+                              disabled={!user?.isCaptain}
+                              className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
+                                  ${gameState.settings.voiceoverResults
+                                      ? 'bg-tg-button text-white border-transparent'
+                                      : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
+                                  }
+                                  ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : '}
+                              `}
+                           >
+                               <span>{t('voiceoverResults', lang)}</span>
+                               {gameState.settings.voiceoverResults && <span className="text-[8px] text-yellow-300 font-bold">{t('expensive', lang)}</span>}
+                           </button>
+                      </div>
+                  </div>
+
                           <span>{t('imageGenerationMode', lang)}</span>
                       </div>
                       <div className="grid grid-cols-3 gap-2">
@@ -908,6 +948,11 @@ const App: React.FC = () => {
                           <img src={gameState.scenarioImage} alt="Scenario" className="w-full h-auto object-cover" />
                       </div>
                   )}
+                  {gameState.scenarioAudio && (
+                      <div className="mb-4 w-full">
+                          <audio controls autoPlay src={gameState.scenarioAudio} className="w-full h-8" />
+                      </div>
+                  )}
                   <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">{t('situation', lang)}</h3>
                   <MarkdownDisplay content={displayedScenario} />
                   {!scenarioRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
@@ -969,6 +1014,11 @@ const App: React.FC = () => {
               )}
 
               <div
+              {gameState.roundResult?.audio && (
+                  <div className="mb-6 w-full">
+                      <audio controls autoPlay src={gameState.roundResult.audio} className="w-full h-8" />
+                  </div>
+              )}
                   className="bg-tg-secondaryBg p-5 rounded-2xl mb-6 shadow-lg border border-tg-hint/10 min-h-[200px]"
                   onClick={handleResultsTap}
               >
