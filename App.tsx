@@ -814,7 +814,7 @@ const App: React.FC = () => {
                                       ? 'bg-tg-button text-white border-transparent'
                                       : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
                                   }
-                                  ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : '}
+                                  ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
                               `}
                            >
                                <span>{t('voiceoverScenario', lang)}</span>
@@ -830,7 +830,7 @@ const App: React.FC = () => {
                                       ? 'bg-tg-button text-white border-transparent'
                                       : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
                                   }
-                                  ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : '}
+                                  ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
                               `}
                            >
                                <span>{t('voiceoverResults', lang)}</span>
@@ -1013,12 +1013,12 @@ const App: React.FC = () => {
                   </div>
               )}
 
-              <div
               {gameState.roundResult?.audio && (
                   <div className="mb-6 w-full">
                       <audio controls autoPlay src={gameState.roundResult.audio} className="w-full h-8" />
                   </div>
               )}
+              <div
                   className="bg-tg-secondaryBg p-5 rounded-2xl mb-6 shadow-lg border border-tg-hint/10 min-h-[200px]"
                   onClick={handleResultsTap}
               >
