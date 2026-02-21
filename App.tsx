@@ -378,15 +378,6 @@ const App: React.FC = () => {
           triggerHaptic("medium");
       }
   };
-      if (scenarioRevealed) return;
-      if (!user?.isCaptain) return;
-
-      scenarioTapCountRef.current += 1;
-      if (scenarioTapCountRef.current % 3 === 0) {
-          setScenarioRevealSpeed(prev => prev * 1.5);
-          triggerHaptic("medium");
-      }
-  };
 
   const handleResultsTap = () => {
       if (textRevealed || gameState.resultsRevealed) return;
