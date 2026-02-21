@@ -163,6 +163,14 @@ class SocketServiceImpl {
           this.currentPlayer = null;
       }
   }
+
+  private notifySubscribers(state: GameState) {
+      this.subscribers.forEach(callback => callback(state));
+  }
+
+  private notifyErrorSubscribers(error: { message: string }) {
+      this.errorSubscribers.forEach(callback => callback(error));
+  }
 }
 
 export const SocketService = new SocketServiceImpl();
