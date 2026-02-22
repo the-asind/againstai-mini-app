@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { GameState, LobbySettings, Player, GameStatus } from '../types';
+import { GameState, LobbySettings, Player, GameStatus, NavyUsageResponse } from '../types';
 import { STORAGE_KEYS } from '../constants';
 
 const URL = import.meta.env.VITE_API_URL || undefined; // undefined = auto-detect host
@@ -41,7 +41,6 @@ class SocketServiceImpl {
 
     this.socket.on('connect_error', (err) => {
       console.error("Socket Connection Error:", err.message);
-      // Maybe notify UI via a separate subscription or just toast?
     });
 
     this.socket.on('game_state', (state: GameState) => {
@@ -86,6 +85,15 @@ class SocketServiceImpl {
       return new Promise((resolve) => {
           this.socket?.emit('validate_api_key', { apiKey }, (response: { isValid: boolean }) => {
               resolve(response.isValid);
+          });
+      });
+  }
+
+  public async validateNavyApiKey(apiKey: string): Promise<NavyUsageResponse | null> {
+      this.connect();
+      return new Promise((resolve) => {
+          this.socket?.emit('validate_navy_key', { apiKey }, (response: { usage: NavyUsageResponse | null }) => {
+              resolve(response.usage);
           });
       });
   }

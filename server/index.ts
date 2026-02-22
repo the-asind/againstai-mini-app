@@ -6,6 +6,7 @@ import cors from 'cors';
 import { CONFIG } from './config';
 import { LobbyService } from './services/lobbyService';
 import { GeminiService } from './services/geminiService';
+import { NavyService } from './services/navyService';
 import { validateTelegramData, TelegramUser } from './utils/telegramAuth';
 import { LobbySettings, Player } from '../types';
 import { setupProxy } from './utils/proxy';
@@ -80,6 +81,21 @@ io.on('connection', (socket) => {
       // We can use a service or just call the Gemini service directly
       const isValid = await GeminiService.validateKey(apiKey);
       if (callback) callback({ isValid });
+  });
+
+  socket.on('validate_navy_key', async ({ apiKey, code }: { apiKey: string, code?: string }, callback) => {
+      const usage = await NavyService.getUsage(apiKey);
+
+      if (usage && code && lobbyService.isPlayerInLobby(code, user.id.toString())) {
+          lobbyService.updatePlayer(code, user.id.toString(), {
+              navyUsage: {
+                  tokens: usage.usage.tokens_remaining_today,
+                  plan: usage.plan
+              }
+          });
+      }
+
+      if (callback) callback({ usage });
   });
 
   socket.on('create_lobby', ({ player, settings }: { player: Player, settings: LobbySettings }, callback) => {

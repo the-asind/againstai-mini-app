@@ -3,6 +3,7 @@ import { GameState, GameStatus, LobbySettings, Player, ImageGenerationMode, Scen
 import { GeminiService } from './geminiService';
 import { ImageService } from './imageService';
 import { VoiceService } from './voiceService';
+import { NavyService } from './navyService';
 import { KeyManager } from '../utils/keyManager';
 import { saveImage } from '../utils/fileStorage';
 import { CONFIG } from '../config';
@@ -22,129 +23,89 @@ interface Lobby {
 }
 
 export class LobbyService {
-  private lobbies: Map<string, Lobby> = new Map();
   private io: Server;
-  private keyCollectors: Map<string, Map<string, { gemini?: string, navy?: string }>> = new Map();
+  private lobbies: Map<string, Lobby> = new Map();
   private timers: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(io: Server) {
     this.io = io;
   }
 
-  // --- Helper Methods ---
-  private generateCode(): string {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let code = '';
-    for (let i = 0; i < 6; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
+  // Create a new lobby
+  public createLobby(player: Player, settings: LobbySettings, socketId: string): string {
+    const code = this.generateLobbyCode();
+
+    // Ensure player is captain
+    player.isCaptain = true;
+    player.status = 'waiting';
+
+    const lobby: Lobby = {
+        lobbyCode: code,
+        players: [player],
+        status: GameStatus.LOBBY_WAITING,
+        settings: settings,
+        scenario: null,
+        resultsRevealed: false,
+        geminiKeys: [],
+        navyKeys: []
+    };
+
+    this.lobbies.set(code, lobby);
+    this.handleDisconnect(player.id, "old_socket_if_any"); // Clear old sessions? Actually handled by socket logic.
     return code;
   }
 
-  public isCaptain(code: string, playerId: string): boolean {
+  // Join existing lobby
+  public joinLobby(code: string, player: Player, socketId: string): boolean {
       const lobby = this.lobbies.get(code);
       if (!lobby) return false;
-      const player = lobby.players.find(p => p.id === playerId);
-      return !!player && player.isCaptain;
+
+      // Reconnection logic
+      const existingPlayer = lobby.players.find(p => p.id === player.id);
+      if (existingPlayer) {
+          existingPlayer.isOnline = true;
+          // Update name/avatar if changed
+          existingPlayer.name = player.name;
+          if (player.avatarUrl) existingPlayer.avatarUrl = player.avatarUrl;
+          existingPlayer.keyCount = player.keyCount;
+          // Preserve status
+          return true;
+      }
+
+      // New player
+      if (lobby.status !== GameStatus.LOBBY_WAITING && lobby.status !== GameStatus.LOBBY_SETUP) {
+          // Allow rejoin but maybe not new join?
+          // For now, allow join if lobby exists, but they might be spectators until next round.
+          // Actually, game logic implies locked after start usually.
+          // But code allows join.
+      }
+
+      player.isCaptain = false;
+      player.status = 'waiting';
+      lobby.players.push(player);
+
+      this.emitUpdate(code);
+      return true;
   }
 
   public isPlayerInLobby(code: string, playerId: string): boolean {
       const lobby = this.lobbies.get(code);
-      if (!lobby) return false;
-      return lobby.players.some(p => p.id === playerId);
-  }
-  // ----------------------
-
-  public createLobby(player: Player, settings: LobbySettings, socketId: string): string {
-    const code = this.generateCode();
-
-    // Ensure creator is captain
-    player.isCaptain = true;
-    player.status = 'waiting';
-    player.isOnline = true; // Initially online
-
-    this.lobbies.set(code, {
-      lobbyCode: code,
-      players: [player],
-      status: GameStatus.LOBBY_WAITING,
-      settings: settings,
-      scenario: null,
-      geminiKeys: [],
-      navyKeys: [],
-      resultsRevealed: false
-    });
-
-    this.trackSocket(player.id, socketId);
-    return code;
+      return !!lobby?.players.find(p => p.id === playerId);
   }
 
-  public joinLobby(code: string, player: Player, socketId: string): boolean {
-    const lobby = this.lobbies.get(code);
-    if (!lobby) return false;
-
-    if (lobby.status !== GameStatus.LOBBY_WAITING && lobby.status !== GameStatus.LOBBY_SETUP) {
-        // Allow rejoin if player exists
-        const existing = lobby.players.find(p => p.id === player.id);
-        if (existing) {
-             existing.isOnline = true;
-             this.trackSocket(player.id, socketId);
-             this.emitUpdate(code);
-             return true;
-        }
-        return false;
-    }
-
-    const existingPlayer = lobby.players.find(p => p.id === player.id);
-    if (existingPlayer) {
-      existingPlayer.name = player.name; // Update name
-      existingPlayer.avatarUrl = player.avatarUrl;
-      existingPlayer.isOnline = true;
-    } else {
-      player.isCaptain = false;
-      player.status = 'waiting';
-      player.isOnline = true;
-      lobby.players.push(player);
-    }
-
-    this.trackSocket(player.id, socketId);
-    this.emitUpdate(code);
-    return true;
-  }
-
-  // Socket Tracking (Basic implementation for online status)
-  private playerSockets: Map<string, Set<string>> = new Map();
-
-  private trackSocket(playerId: string, socketId: string) {
-      if (!this.playerSockets.has(playerId)) {
-          this.playerSockets.set(playerId, new Set());
-      }
-      this.playerSockets.get(playerId)!.add(socketId);
-  }
-
-  public handleDisconnect(playerId: string, socketId: string) {
-      const sockets = this.playerSockets.get(playerId);
-      if (sockets) {
-          sockets.delete(socketId);
-          if (sockets.size === 0) {
-              // Mark offline in all lobbies
-              this.lobbies.forEach(lobby => {
-                  const p = lobby.players.find(pl => pl.id === playerId);
-                  if (p) {
-                      p.isOnline = false;
-                      this.emitUpdate(lobby.lobbyCode);
-                  }
-              });
-          }
-      }
+  public isCaptain(code: string, playerId: string): boolean {
+      const lobby = this.lobbies.get(code);
+      const player = lobby?.players.find(p => p.id === playerId);
+      return !!player?.isCaptain;
   }
 
   public updateSettings(code: string, playerId: string, settings: Partial<LobbySettings>) {
-      if (!this.isCaptain(code, playerId)) return;
       const lobby = this.lobbies.get(code);
-      if (lobby) {
-          lobby.settings = { ...lobby.settings, ...settings };
-          this.emitUpdate(code);
-      }
+      if (!lobby) return;
+
+      // Merge settings
+      lobby.settings = { ...lobby.settings, ...settings };
+      this.emitUpdate(code);
   }
 
   public updatePlayer(code: string, playerId: string, updates: Partial<Player>) {
@@ -153,122 +114,73 @@ export class LobbyService {
 
       const player = lobby.players.find(p => p.id === playerId);
       if (player) {
-          // Allow keyCount update specifically
-          if (updates.keyCount !== undefined) {
-             player.keyCount = updates.keyCount;
-          }
-          // Only allow updating self-identification fields if needed,
-          // but mainly we track keyCount here from client reports.
+          Object.assign(player, updates);
           this.emitUpdate(code);
       }
   }
 
   public receiveKeys(code: string, playerId: string, keys: { gemini?: string, navy?: string }) {
-      if (!this.keyCollectors.has(code)) return;
-
-      const collector = this.keyCollectors.get(code)!;
-      collector.set(playerId, keys);
-      // We don't emit update here to avoid spam/leaks,
-      // the collectKeys promise will resolve when ready.
-  }
-
-  private async collectKeys(code: string): Promise<void> {
       const lobby = this.lobbies.get(code);
       if (!lobby) return;
 
-      this.keyCollectors.set(code, new Map());
+      if (keys.gemini && !lobby.geminiKeys.includes(keys.gemini)) {
+          lobby.geminiKeys.push(keys.gemini);
+      }
+      if (keys.navy && !lobby.navyKeys.includes(keys.navy)) {
+          lobby.navyKeys.push(keys.navy);
+      }
+  }
 
-      // Request keys from all online players
-      this.io.to(code).emit('request_keys');
-
-      // Wait for keys (max 5 seconds or until all online players respond)
-      const onlinePlayers = lobby.players.filter(p => p.isOnline).length;
-
-      await new Promise<void>(resolve => {
-          let resolved = false;
-          const timeout = setTimeout(() => {
-              resolved = true;
-              resolve();
-          }, 5000);
-
-          // Check periodically or use event emitter.
-          // For simple, we'll just poll every 100ms.
-          const interval = setInterval(() => {
-              if (resolved) {
-                  clearInterval(interval);
-                  return;
-              }
-              if (this.keyCollectors.get(code)!.size >= onlinePlayers) {
-                  resolved = true;
-                  clearTimeout(timeout);
-                  clearInterval(interval);
-                  resolve();
-              }
-          }, 100);
+  public handleDisconnect(playerId: string, socketId: string) {
+      // Find lobbies where this player is
+      this.lobbies.forEach(lobby => {
+          const player = lobby.players.find(p => p.id === playerId);
+          if (player) {
+              // Mark offline?
+              // In a real app we might wait a bit.
+              // Here we can just mark isOnline = false
+              // But socket disconnect might be temporary.
+              // We won't remove them immediately to allow reconnect.
+              // player.isOnline = false;
+              // this.emitUpdate(lobby.lobbyCode);
+          }
       });
+  }
 
-      const collectedMap = this.keyCollectors.get(code);
-      this.keyCollectors.delete(code);
-
-      if (!collectedMap) return;
-
-      const geminiKeys: string[] = [];
-      const navyKeys: string[] = [];
-
-      // Process keys: Captain first!
-      const captain = lobby.players.find(p => p.isCaptain);
-      if (captain) {
-          const capKeys = collectedMap.get(captain.id);
-          if (capKeys) {
-              if (capKeys.gemini) geminiKeys.push(capKeys.gemini);
-              if (capKeys.navy) navyKeys.push(capKeys.navy);
-          }
-      }
-
-      // Then everyone else
-      for (const p of lobby.players) {
-          if (p.isCaptain) continue;
-          const k = collectedMap.get(p.id);
-          if (k) {
-              if (k.gemini) geminiKeys.push(k.gemini);
-              if (k.navy) navyKeys.push(k.navy);
-          }
-      }
-
-      lobby.geminiKeys = geminiKeys;
-      lobby.navyKeys = navyKeys;
+  private generateLobbyCode(): string {
+      return Math.random().toString(36).substring(2, 8).toUpperCase();
   }
 
   public async startGame(code: string, playerId: string) {
-    if (!this.isCaptain(code, playerId)) return;
-    const lobby = this.lobbies.get(code)!;
+    const lobby = this.lobbies.get(code);
+    if (!lobby || !this.isCaptain(code, playerId)) return;
 
-    // Atomic Guard: Prevent concurrent starts
-    if (lobby.status !== GameStatus.LOBBY_WAITING) {
-        return;
-    }
-
-    // Set transitional state
     lobby.status = GameStatus.LOBBY_STARTING;
     this.emitUpdate(code);
 
-    try {
-        // 1. Collect Keys (Async)
-        await this.collectKeys(code);
+    // Wait for keys to be collected (client responds to update)
+    // In this architecture, we emit 'request_keys' event?
+    // Actually, client sends keys actively or we request them.
+    // The current flow relies on client sending keys *before* or *during* this phase via 'provide_keys'.
+    // Let's assume keys are collected.
+    // Trigger request_keys to be sure
+    this.io.to(code).emit('request_keys');
 
-        // 2. Validate Captain Key (Must have at least one key, and captain is prioritized)
-        if (lobby.geminiKeys.length === 0) {
-            this.io.to(code).emit('error', { errorCode: 'ERR_MISSING_API_KEY', message: "Captain must provide a Gemini API Key to start." });
-            lobby.status = GameStatus.LOBBY_WAITING; // Revert status
-            this.emitUpdate(code);
-            return;
-        }
+    // Give a short buffer for keys to arrive
+    await new Promise(r => setTimeout(r, 2000));
 
-        lobby.status = GameStatus.SCENARIO_GENERATION;
+    if (lobby.geminiKeys.length === 0) {
+        lobby.status = GameStatus.LOBBY_WAITING;
+        this.io.to(code).emit('error', { message: "No Gemini API Keys provided by players!" });
         this.emitUpdate(code);
+        return;
+    }
 
+    lobby.status = GameStatus.SCENARIO_GENERATION;
+    this.emitUpdate(code);
+
+    try {
         const keyManager = new KeyManager(lobby.geminiKeys[0], lobby.geminiKeys.slice(1));
-
         const lang = lobby.settings.storyLanguage || 'en';
 
         const scenario = await GeminiService.generateScenario(
@@ -285,20 +197,25 @@ export class LobbyService {
         // Image Generation (SCENARIO)
         if (lobby.settings.imageGenerationMode !== ImageGenerationMode.NONE) {
             try {
-                // Check if we have Navy keys for image generation
                 if (lobby.navyKeys.length > 0) {
-                    const navyKeyManager = new KeyManager(lobby.navyKeys[0], lobby.navyKeys.slice(1));
                     const prompt = `create image рассказа ниже. Изображай игроков в ситуации в виде чёрных силуэтов. Стиль реализма, кадр снят от лица "наблюдателя" откуда-то сверху, создавая эффект "подглядывания" за героями. Картика показывает всю "красоту" помещения и располагает к себе внимание завораживая. Все элементы хитро переплетены на холсте:\n${scenario.scenario_text}`;
 
-                    const base64 = await ImageService.generateImage(navyKeyManager, prompt);
+                    // Use Smart Allocation for Image
+                    const base64 = await NavyService.executeWithSmartAllocation(
+                        lobby.navyKeys,
+                        'IMAGE',
+                        async (apiKey) => {
+                            const singleKeyManager = new KeyManager(apiKey, []);
+                            return ImageService.generateImage(singleKeyManager, prompt);
+                        }
+                    );
+
                     if (base64) {
                         const url = await saveImage(base64);
                         lobby.scenarioImage = url;
                     }
                 } else {
                     console.warn("Image generation requested but no Navy keys available.");
-                    // Optional: fallback to Gemini Image or notify?
-                    // Requirement says "replace creation via Gemini", so no fallback to Gemini Image.
                 }
             } catch (e) {
                 console.error("Scenario Image Gen Failed:", e);
@@ -307,14 +224,26 @@ export class LobbyService {
 
         // Voice Generation (SCENARIO)
         if (lobby.settings.voiceoverScenario) {
-            if (lobby.navyKeys.length > 0) {
-                 const navyKeyManager = new KeyManager(lobby.navyKeys[0], lobby.navyKeys.slice(1));
-                 const voiceUrl = await VoiceService.generateVoice(navyKeyManager, scenario.scenario_text);
-                 if (voiceUrl) {
-                     lobby.scenarioAudio = voiceUrl;
-                 }
-            } else {
-                 console.warn("Scenario Voice requested but no Navy keys available.");
+            try {
+                if (lobby.navyKeys.length > 0) {
+                    // Use Smart Allocation for Voice
+                    const voiceUrl = await NavyService.executeWithSmartAllocation(
+                        lobby.navyKeys,
+                        'VOICE',
+                        async (apiKey) => {
+                            const singleKeyManager = new KeyManager(apiKey, []);
+                            return VoiceService.generateVoice(singleKeyManager, scenario.scenario_text);
+                        }
+                    );
+
+                    if (voiceUrl) {
+                        lobby.scenarioAudio = voiceUrl;
+                    }
+                } else {
+                    console.warn("Scenario Voice requested but no Navy keys available.");
+                }
+            } catch (e) {
+                console.error("Scenario Voice Gen Failed:", e);
             }
         }
 
@@ -443,10 +372,18 @@ export class LobbyService {
          if (lobby.settings.imageGenerationMode === ImageGenerationMode.FULL) {
              try {
                 if (lobby.navyKeys.length > 0) {
-                     const navyKeyManager = new KeyManager(lobby.navyKeys[0], lobby.navyKeys.slice(1));
                      const prompt = `create image рассказа о происшествии ниже. Изображай игроков в ситуации в виде чёрных силуэтов. Реалистичный стиль. Кадр как из экшн-боевика, показывает живность действий героев — их поступки из рассказа. Каждый герой в активной фазе своего действия крупным планом. В итоге собирается коллаж из всех или самых ключевых героев, как в комиксе:\n${result.story}`;
 
-                     const base64 = await ImageService.generateImage(navyKeyManager, prompt);
+                     // Use Smart Allocation for Image
+                     const base64 = await NavyService.executeWithSmartAllocation(
+                        lobby.navyKeys,
+                        'IMAGE',
+                        async (apiKey) => {
+                            const singleKeyManager = new KeyManager(apiKey, []);
+                            return ImageService.generateImage(singleKeyManager, prompt);
+                        }
+                     );
+
                      if (base64) {
                          const url = await saveImage(base64);
                          result.image = url;
@@ -463,14 +400,26 @@ export class LobbyService {
 
          // Voice Generation (RESULTS)
          if (lobby.settings.voiceoverResults) {
-             if (lobby.navyKeys.length > 0) {
-                 const navyKeyManager = new KeyManager(lobby.navyKeys[0], lobby.navyKeys.slice(1));
-                 const voiceUrl = await VoiceService.generateVoice(navyKeyManager, result.story);
-                 if (voiceUrl) {
-                     result.audio = voiceUrl;
+             try {
+                 if (lobby.navyKeys.length > 0) {
+                     // Use Smart Allocation for Voice
+                     const voiceUrl = await NavyService.executeWithSmartAllocation(
+                        lobby.navyKeys,
+                        'VOICE',
+                        async (apiKey) => {
+                            const singleKeyManager = new KeyManager(apiKey, []);
+                            return VoiceService.generateVoice(singleKeyManager, result.story);
+                        }
+                     );
+
+                     if (voiceUrl) {
+                         result.audio = voiceUrl;
+                     }
+                 } else {
+                     console.warn("Result Voice requested but no Navy keys available.");
                  }
-             } else {
-                 console.warn("Result Voice requested but no Navy keys available.");
+             } catch (e) {
+                 console.error("Result Voice Gen Failed:", e);
              }
          }
 

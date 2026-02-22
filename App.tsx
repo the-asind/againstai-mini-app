@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel, ImageGenerationMode } from './types';
+import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel, ImageGenerationMode, NavyUsageResponse } from './types';
 import { translations, t } from './i18n';
 import { DEFAULT_SETTINGS, MIN_TIME, MAX_TIME, MIN_CHARS, MAX_CHARS, STORAGE_KEYS } from './constants';
 import { SocketService } from './services/socketService';
@@ -36,7 +36,28 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     settingsNick, setSettingsNick, settingsApiKey, setSettingsApiKey,
     settingsNavyApiKey, setSettingsNavyApiKey,
     saveSettings, setShowSettingsModal, lang, user
-}) => (
+}) => {
+    // New state
+    const [navyStats, setNavyStats] = useState<NavyUsageResponse | null>(null);
+
+    // Effect to validate key
+    useEffect(() => {
+        if (!settingsNavyApiKey || settingsNavyApiKey.length < 10) {
+            setNavyStats(null);
+            return;
+        }
+        const timer = setTimeout(async () => {
+             const stats = await SocketService.validateNavyApiKey(settingsNavyApiKey);
+             setNavyStats(stats);
+        }, 800);
+        return () => clearTimeout(timer);
+    }, [settingsNavyApiKey]);
+
+    // Calculate approximate capacities
+    const voiceCount = navyStats ? Math.floor(navyStats.usage.tokens_remaining_today / 55000) : 0;
+    const imageCount = navyStats ? Math.floor(navyStats.usage.tokens_remaining_today / 7500) : 0;
+
+    return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
         <div className="bg-tg-secondaryBg w-full max-w-sm rounded-2xl p-6 border border-tg-hint/20 shadow-2xl space-y-4">
             <h3 className="text-xl font-bold text-center">{t('settingsTitle', lang)}</h3>
@@ -76,6 +97,30 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                  <p className="text-[10px] text-tg-hint">
                     {t('api_get_free_key_at', lang) || "Get free key at"} <a href="https://api.navy" target="_blank" className="underline text-tg-link">api.navy</a>.
                  </p>
+                 {/* Navy Stats Display */}
+                 {navyStats && (
+                     <div className="bg-black/20 p-2 rounded text-[10px] space-y-1 border border-tg-hint/10">
+                         <div className="flex justify-between">
+                             <span className="text-tg-hint">Plan:</span>
+                             <span className="font-bold text-tg-text">{navyStats.plan}</span>
+                         </div>
+                         <div className="flex justify-between">
+                             <span className="text-tg-hint">Tokens:</span>
+                             <span className={`font-bold ${navyStats.usage.tokens_remaining_today < 10000 ? 'text-red-400' : 'text-green-400'}`}>
+                                 {(navyStats.usage.tokens_remaining_today / 1000).toFixed(1)}k
+                             </span>
+                         </div>
+                         <div className="border-t border-tg-hint/10 my-1"></div>
+                         <div className="flex justify-between">
+                             <span className="text-tg-hint">Est. Voices:</span>
+                             <span className="font-bold">{voiceCount}</span>
+                         </div>
+                         <div className="flex justify-between">
+                             <span className="text-tg-hint">Est. Images:</span>
+                             <span className="font-bold">{imageCount}</span>
+                         </div>
+                     </div>
+                 )}
             </div>
 
             <div className="flex gap-3 pt-2">
@@ -88,7 +133,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
         </div>
     </div>
-);
+    );
+};
 
 const App: React.FC = () => {
   // -- Initialization & State --
@@ -889,6 +935,15 @@ const App: React.FC = () => {
               </div>
 
               <div className="space-y-3 mt-6">
+                 {/* Navy Warning */}
+                 {(gameState.settings.voiceoverScenario || gameState.settings.voiceoverResults) &&
+                  !gameState.players.some(p => (p.navyUsage?.tokens || 0) >= 55000) && (
+                     <div className="bg-yellow-500/20 border border-yellow-500/50 p-3 rounded-lg text-xs text-yellow-200 animate-pulse flex items-center gap-2">
+                         <span className="text-xl">⚠️</span>
+                         <span>{t("warning_low_tokens", lang) || "Voiceover enabled but no player has enough Navy tokens (need 55k+)."}</span>
+                     </div>
+                 )}
+
                  {user?.isCaptain ? (
                      <Button
                         onClick={handleStartGame}

@@ -96,6 +96,7 @@ export const translations = {
     voiceoverScenario: "Voiceover Scenario",
     voiceoverResults: "Voiceover Results",
     expensive: "Expensive!"
+    warning_low_tokens: "Voiceover enabled but no player has enough Navy tokens (need 55k+).",
   },
   ru: {
     createLobby: "Создать лобби",
@@ -192,6 +193,7 @@ export const translations = {
     voiceoverScenario: "Озвучка Сценария",
     voiceoverResults: "Озвучка Результатов",
     expensive: "Дорого!"
+    warning_low_tokens: "Озвучка включена, но у игроков недостаточно токенов Navy (нужно 55к+).",
   }
 };
 

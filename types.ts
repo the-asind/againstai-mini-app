@@ -45,6 +45,10 @@ export interface Player {
   actionText?: string;
   isOnline: boolean;
   keyCount: 0 | 1 | 2; // Stricter type: 0, 1, or 2
+  navyUsage?: {
+    tokens: number;
+    plan: string;
+  } | null;
 }
 
 export type AIModelLevel = 'economy' | 'balanced' | 'premium';
@@ -151,4 +155,28 @@ export interface ScenarioResponse {
     sanity_check: string;
   };
   scenario_text: string;
+}
+
+export interface NavyUsageResponse {
+  plan: string;
+  limits: {
+    tokens_per_day: number;
+    rpm: number;
+  };
+  usage: {
+    tokens_used_today: number;
+    tokens_remaining_today: number;
+    percent_used: number;
+    resets_at_utc: string;
+    resets_in_ms: number;
+  };
+  rate_limits: {
+    per_minute: {
+      limit: number;
+      used: number;
+      remaining: number;
+      resets_in_ms: number;
+    };
+  };
+  server_time_utc: string;
 }
