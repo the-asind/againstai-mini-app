@@ -38,6 +38,7 @@ export class LobbyService {
     // Ensure player is captain
     player.isCaptain = true;
     player.status = 'waiting';
+    player.isOnline = true; // Ensure online
 
     const lobby: Lobby = {
         lobbyCode: code,
@@ -51,7 +52,7 @@ export class LobbyService {
     };
 
     this.lobbies.set(code, lobby);
-    this.handleDisconnect(player.id, "old_socket_if_any"); // Clear old sessions? Actually handled by socket logic.
+    // this.handleDisconnect(player.id, "old_socket_if_any"); // Removed to avoid premature disconnects
     return code;
   }
 
@@ -82,6 +83,7 @@ export class LobbyService {
 
       player.isCaptain = false;
       player.status = 'waiting';
+      player.isOnline = true;
       lobby.players.push(player);
 
       this.emitUpdate(code);
@@ -136,19 +138,26 @@ export class LobbyService {
       this.lobbies.forEach(lobby => {
           const player = lobby.players.find(p => p.id === playerId);
           if (player) {
-              // Mark offline?
-              // In a real app we might wait a bit.
-              // Here we can just mark isOnline = false
-              // But socket disconnect might be temporary.
-              // We won't remove them immediately to allow reconnect.
-              // player.isOnline = false;
-              // this.emitUpdate(lobby.lobbyCode);
+              // Mark offline
+              player.isOnline = false;
+              this.emitUpdate(lobby.lobbyCode);
           }
       });
   }
 
   private generateLobbyCode(): string {
-      return Math.random().toString(36).substring(2, 8).toUpperCase();
+      const maxRetries = 10;
+      let attempts = 0;
+
+      while (attempts < maxRetries) {
+          const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+          if (!this.lobbies.has(code)) {
+              return code;
+          }
+          attempts++;
+      }
+
+      throw new Error("Failed to generate unique lobby code after 10 attempts.");
   }
 
   public async startGame(code: string, playerId: string) {
@@ -158,16 +167,21 @@ export class LobbyService {
     lobby.status = GameStatus.LOBBY_STARTING;
     this.emitUpdate(code);
 
-    // Wait for keys to be collected (client responds to update)
-    // In this architecture, we emit 'request_keys' event?
-    // Actually, client sends keys actively or we request them.
-    // The current flow relies on client sending keys *before* or *during* this phase via 'provide_keys'.
-    // Let's assume keys are collected.
-    // Trigger request_keys to be sure
+    // Request keys from clients
     this.io.to(code).emit('request_keys');
 
-    // Give a short buffer for keys to arrive
-    await new Promise(r => setTimeout(r, 2000));
+    // Polling for keys (max 5 seconds)
+    const maxWaitTime = 5000;
+    const pollInterval = 200;
+    let waited = 0;
+
+    while (waited < maxWaitTime) {
+        if (lobby.geminiKeys.length > 0) {
+            break;
+        }
+        await new Promise(r => setTimeout(r, pollInterval));
+        waited += pollInterval;
+    }
 
     if (lobby.geminiKeys.length === 0) {
         lobby.status = GameStatus.LOBBY_WAITING;
@@ -205,8 +219,8 @@ export class LobbyService {
                         lobby.navyKeys,
                         'IMAGE',
                         async (apiKey) => {
-                            const singleKeyManager = new KeyManager(apiKey, []);
-                            return ImageService.generateImage(singleKeyManager, prompt);
+                            // Pass raw key now (service refactored)
+                            return ImageService.generateImage(apiKey, prompt);
                         }
                     );
 
@@ -231,8 +245,8 @@ export class LobbyService {
                         lobby.navyKeys,
                         'VOICE',
                         async (apiKey) => {
-                            const singleKeyManager = new KeyManager(apiKey, []);
-                            return VoiceService.generateVoice(singleKeyManager, scenario.scenario_text);
+                             // Pass raw key now (service refactored)
+                            return VoiceService.generateVoice(apiKey, scenario.scenario_text);
                         }
                     );
 
@@ -379,8 +393,8 @@ export class LobbyService {
                         lobby.navyKeys,
                         'IMAGE',
                         async (apiKey) => {
-                            const singleKeyManager = new KeyManager(apiKey, []);
-                            return ImageService.generateImage(singleKeyManager, prompt);
+                             // Pass raw key now (service refactored)
+                            return ImageService.generateImage(apiKey, prompt);
                         }
                      );
 
@@ -407,8 +421,8 @@ export class LobbyService {
                         lobby.navyKeys,
                         'VOICE',
                         async (apiKey) => {
-                            const singleKeyManager = new KeyManager(apiKey, []);
-                            return VoiceService.generateVoice(singleKeyManager, result.story);
+                             // Pass raw key now (service refactored)
+                            return VoiceService.generateVoice(apiKey, result.story);
                         }
                      );
 
@@ -447,7 +461,9 @@ export class LobbyService {
 
   public revealResults(code: string, playerId: string) {
       if (!this.isCaptain(code, playerId)) return;
-      const lobby = this.lobbies.get(code)!;
+      const lobby = this.lobbies.get(code); // Safe access
+
+      if (!lobby) return;
 
       if (lobby.status === GameStatus.RESULTS && !lobby.resultsRevealed) {
           lobby.resultsRevealed = true;
@@ -457,7 +473,9 @@ export class LobbyService {
 
   public resetGame(code: string, playerId: string) {
       if (!this.isCaptain(code, playerId)) return;
-      const lobby = this.lobbies.get(code)!;
+      const lobby = this.lobbies.get(code); // Safe access
+
+      if (!lobby) return;
 
       lobby.status = GameStatus.LOBBY_WAITING;
       lobby.scenario = null;

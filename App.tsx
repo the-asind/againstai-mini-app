@@ -40,17 +40,27 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     // New state
     const [navyStats, setNavyStats] = useState<NavyUsageResponse | null>(null);
 
-    // Effect to validate key
+    // Effect to validate key with stale closure guard
     useEffect(() => {
+        let isCancelled = false;
+
         if (!settingsNavyApiKey || settingsNavyApiKey.length < 10) {
             setNavyStats(null);
             return;
         }
+
         const timer = setTimeout(async () => {
+             // Pass undefined code to validate just the key (or current lobby if socket knows it)
              const stats = await SocketService.validateNavyApiKey(settingsNavyApiKey);
-             setNavyStats(stats);
+             if (!isCancelled) {
+                 setNavyStats(stats);
+             }
         }, 800);
-        return () => clearTimeout(timer);
+
+        return () => {
+            isCancelled = true;
+            clearTimeout(timer);
+        };
     }, [settingsNavyApiKey]);
 
     // Calculate approximate capacities
@@ -136,6 +146,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     );
 };
 
+
 const App: React.FC = () => {
   // -- Initialization & State --
   
@@ -195,738 +206,560 @@ const App: React.FC = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const actionInputRef = useRef(''); // Ref for current input to avoid stale closures
 
-  // Drag Scroll State
-  const [isDragging, setIsDragging] = useState(false);
-  const startX = useRef(0);
-  const scrollLeftRef = useRef(0);
+  // -- Effects --
 
-  // Text Reveal State
-  const [displayedText, setDisplayedText] = useState('');
-  const [textRevealed, setTextRevealed] = useState(false);
-  const [revealSpeedMultiplier, setRevealSpeedMultiplier] = useState(1);
-  const tapCountRef = useRef(0);
-  // Scenario Reveal State
-  const [displayedScenario, setDisplayedScenario] = useState("");
-  const [scenarioRevealed, setScenarioRevealed] = useState(false);
-  const [scenarioRevealSpeed, setScenarioRevealSpeed] = useState(1);
-  const scenarioTapCountRef = useRef(0);
+  useEffect(() => {
+    const initApp = async () => {
+        // Init Telegram WebApp
+        const tg = window.Telegram?.WebApp;
+        if (tg) {
+            tg.ready();
+            tg.expand();
 
-  // Helper for Haptics to avoid v6.0 crash
-  const triggerHaptic = (type: 'error' | 'success' | 'warning' | 'medium') => {
-    const tg = window.Telegram.WebApp;
-    if (tg.isVersionAtLeast && tg.isVersionAtLeast('6.1')) {
-       if (type === 'medium') {
-           tg.HapticFeedback.impactOccurred('medium');
-       } else {
-           tg.HapticFeedback.notificationOccurred(type);
-       }
-    }
+            // Theme Params
+            document.documentElement.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#1f2937'); // Fallback gray-800
+            document.documentElement.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#ffffff');
+            document.documentElement.style.setProperty('--tg-theme-hint-color', tg.themeParams.hint_color || '#9ca3af');
+            document.documentElement.style.setProperty('--tg-theme-link-color', tg.themeParams.link_color || '#3b82f6');
+            document.documentElement.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#3b82f6');
+            document.documentElement.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff');
+            document.documentElement.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#374151'); // Fallback gray-700
+        }
+
+        // Connect Socket
+        SocketService.connect();
+
+        // Load saved nickname/keys for modal
+        const savedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME);
+        if (savedNick) setSettingsNick(savedNick);
+
+        const savedKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
+        if (savedKey) setSettingsApiKey(savedKey);
+
+        const savedNavyKey = localStorage.getItem(STORAGE_KEYS.NAVY_KEY);
+        if (savedNavyKey) setSettingsNavyApiKey(savedNavyKey);
+
+        // Auto-create player object if we have saved data
+        if (savedNick) {
+             const userObj = window.Telegram?.WebApp?.initDataUnsafe?.user;
+             const newPlayer: Player = {
+                 id: userObj?.id?.toString() || Math.random().toString(36).substr(2, 9), // Fallback ID
+                 name: savedNick,
+                 isCaptain: false, // Will be set by server on create
+                 status: 'waiting',
+                 isOnline: true,
+                 keyCount: getKeyCount(),
+                 avatarUrl: userObj?.username ? `https://t.me/i/userpic/320/${userObj.username}.jpg` : undefined
+             };
+             setUser(newPlayer);
+        }
+    };
+
+    initApp();
+
+    // Socket Subscriptions
+    const unsubState = SocketService.subscribe((newState) => {
+        setGameState(newState);
+
+        // Update local player ref if changed (e.g. captain status)
+        if (user) {
+            const me = newState.players.find(p => p.id === user.id);
+            if (me) {
+                setUser(prev => prev ? ({ ...prev, ...me }) : me);
+            }
+        }
+    });
+
+    const unsubError = SocketService.subscribeToErrors((err) => {
+        setToast({ msg: err.message, type: 'error' });
+    });
+
+    return () => {
+        unsubState();
+        unsubError();
+    };
+  }, []);
+
+  // Timer Effect
+  useEffect(() => {
+     let interval: NodeJS.Timeout;
+     if (gameState.status === GameStatus.PLAYER_INPUT) {
+         timeLeftRef.current = gameState.settings.timeLimitSeconds;
+         setTimeLeftDisplay(gameState.settings.timeLimitSeconds);
+
+         interval = setInterval(() => {
+             timeLeftRef.current -= 1;
+             setTimeLeftDisplay(timeLeftRef.current);
+             if (timeLeftRef.current <= 0) {
+                 clearInterval(interval);
+                 // Auto-submit happens via server timeout usually, but we can force it too?
+                 // Let's rely on server for robust timeout handling, but client can submit partial.
+                 // Actually, server handles it.
+             }
+         }, 1000);
+     }
+     return () => clearInterval(interval);
+  }, [gameState.status, gameState.settings.timeLimitSeconds]);
+
+  // Toast Auto-Hide
+  useEffect(() => {
+      if (toast) {
+          const timer = setTimeout(() => setToast(null), 3000);
+          return () => clearTimeout(timer);
+      }
+  }, [toast]);
+
+  // -- Handlers --
+
+  const handleSaveSettings = () => {
+      if (!settingsNick.trim()) {
+          setToast({ msg: t('nicknameRequired', lang), type: 'error' });
+          return;
+      }
+
+      localStorage.setItem(STORAGE_KEYS.NICKNAME, settingsNick);
+
+      if (settingsApiKey.trim()) {
+          localStorage.setItem(STORAGE_KEYS.API_KEY, settingsApiKey);
+      } else {
+          localStorage.removeItem(STORAGE_KEYS.API_KEY);
+      }
+
+      if (settingsNavyApiKey.trim()) {
+          localStorage.setItem(STORAGE_KEYS.NAVY_KEY, settingsNavyApiKey);
+          // Also validate immediately to update server?
+          SocketService.validateNavyApiKey(settingsNavyApiKey);
+      } else {
+          localStorage.removeItem(STORAGE_KEYS.NAVY_KEY);
+      }
+
+      // Update User Object
+      const userObj = window.Telegram?.WebApp?.initDataUnsafe?.user;
+      const updatedUser: Player = {
+          id: userObj?.id?.toString() || (user?.id || Math.random().toString(36).substr(2, 9)),
+          name: settingsNick,
+          isCaptain: user?.isCaptain || false,
+          status: user?.status || 'waiting',
+          isOnline: true,
+          keyCount: getKeyCount(),
+          avatarUrl: userObj?.username ? `https://t.me/i/userpic/320/${userObj.username}.jpg` : undefined
+      };
+
+      setUser(updatedUser);
+      setShowSettingsModal(false);
+
+      // If in lobby, broadcast update
+      if (gameState.lobbyCode) {
+          SocketService.updatePlayer(gameState.lobbyCode, {
+              name: settingsNick,
+              keyCount: getKeyCount()
+              // We don't send keys here, they are sent on demand
+          });
+      }
   };
 
-  // Sync state to ref
+  const handleCreateLobby = async () => {
+      if (!user) {
+          setShowSettingsModal(true);
+          return;
+      }
+      // Check API Key
+      if (!localStorage.getItem(STORAGE_KEYS.API_KEY)) {
+           setToast({ msg: t('missingApiKey', lang), type: 'error' });
+           setShowSettingsModal(true);
+           return;
+      }
+
+      setLoading(true);
+      try {
+          await SocketService.createLobby(user, gameState.settings);
+      } catch (e: any) {
+          setToast({ msg: e.message || "Failed", type: 'error' });
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const handleJoinLobby = async (code: string) => {
+      if (!user) {
+          setShowSettingsModal(true);
+          return;
+      }
+      setLoading(true);
+      try {
+          const success = await SocketService.joinLobby(code, user);
+          if (!success) setToast({ msg: t('lobbyNotFound', lang), type: 'error' });
+      } catch (e: any) {
+          setToast({ msg: e.message || "Failed", type: 'error' });
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const handleUpdateSettings = (key: keyof LobbySettings, value: any) => {
+      if (gameState.lobbyCode) {
+          SocketService.updateSettings(gameState.lobbyCode, { [key]: value });
+      } else {
+          // Update local initial settings
+          setGameState(prev => ({
+              ...prev,
+              settings: { ...prev.settings, [key]: value }
+          }));
+          // Save to local storage
+          const newSettings = { ...gameState.settings, [key]: value };
+          localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(newSettings));
+      }
+  };
+
+  const handleStartGame = () => {
+      if (gameState.lobbyCode) {
+          SocketService.startGame(gameState.lobbyCode);
+      }
+  };
+
   const handleActionInputChange = (val: string) => {
       setActionInput(val);
       actionInputRef.current = val;
   };
 
-  // -- Effects --
+  const handleSubmitAction = (force: boolean = false) => {
+      if (!gameState.lobbyCode) return;
 
-  // Toast Timer
-  useEffect(() => {
-    if (toast) {
-        const timer = setTimeout(() => setToast(null), 3000);
-        return () => clearTimeout(timer);
-    }
-  }, [toast]);
-
-  // Horizontal Scroll Fix for Mouse Wheel
-  useEffect(() => {
-      const el = scrollContainerRef.current;
-      if (el) {
-          const handleWheel = (e: WheelEvent) => {
-              if (e.deltaY !== 0) {
-                  // Prevent vertical page scroll, scroll horizontally instead
-                  e.preventDefault();
-                  el.scrollLeft += e.deltaY;
-              }
-          };
-          // passive: false is required to preventDefault
-          el.addEventListener('wheel', handleWheel, { passive: false });
-          return () => el.removeEventListener('wheel', handleWheel);
+      // Validation?
+      if (!force && actionInput.length < MIN_CHARS) {
+          setErrorMsg(`${t('chars', lang)}: ${actionInput.length}/${MIN_CHARS}`);
+          return;
       }
-  }, [gameState.status]); // Re-bind if view changes
 
-  // Initialize Telegram Web App & Load Persistence
+      setLoading(true);
+      SocketService.submitAction(gameState.lobbyCode, actionInput);
+      setLoading(false);
+      setErrorMsg('');
+  };
+
+  const handleRevealResults = () => {
+      if (gameState.lobbyCode) {
+          SocketService.revealResults(gameState.lobbyCode);
+      }
+  };
+
+  const handleRestart = () => {
+      if (gameState.lobbyCode) {
+          SocketService.resetGame(gameState.lobbyCode);
+      }
+  };
+
+  const handleShare = () => {
+      const link = `https://t.me/AgainstAI_Bot/app?startapp=${gameState.lobbyCode}`;
+      navigator.clipboard.writeText(link);
+      setToast({ msg: t('linkCopied', lang), type: 'success' });
+  };
+
+  // Interactions
+  const [scenarioRevealed, setScenarioRevealed] = useState(false);
+  const [textRevealed, setTextRevealed] = useState(false);
+
   useEffect(() => {
-    const tg = window.Telegram.WebApp;
-    tg.ready();
-    tg.expand();
-    
-    const initData = tg.initDataUnsafe;
-    const userId = initData.user?.id.toString() || 'guest_' + Math.floor(Math.random() * 1000);
-    const tgFirstName = initData.user?.first_name || 'Survivor';
-    
-    // Load persisted inputs
-    const storedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME) || tgFirstName;
-    const initialKeyCount = getKeyCount();
-
-    // Default User State
-    const playerObj: Player = {
-      id: userId,
-      name: storedNick,
-      isCaptain: false,
-      status: 'waiting',
-      isOnline: true,
-      keyCount: initialKeyCount
-    };
-    setUser(playerObj);
-
-    // If no local override, use TG language
-    if (!localStorage.getItem(STORAGE_KEYS.LANG) && initData.user?.language_code === 'ru') {
-        setLang('ru');
-    }
-
-    // Subscribe to Socket Updates
-    const unsubscribe = SocketService.subscribe((newState) => {
-      setGameState((prevState) => {
-        // Handle Transition to Input: Reset Timer locally
-        // We use prevState to avoid closure staleness issues
-        if (newState.status === GameStatus.PLAYER_INPUT && prevState.status !== GameStatus.PLAYER_INPUT) {
-            timeLeftRef.current = newState.settings.timeLimitSeconds;
-            setTimeLeftDisplay(newState.settings.timeLimitSeconds);
-            // Reset input on new round
-            setActionInput("");
-            actionInputRef.current = "";
-        }
-        return newState;
-      });
-    });
-
-    const unsubscribeErrors = SocketService.subscribeToErrors((err) => {
-         setToast({ msg: err.message, type: 'error' });
-         triggerHaptic('error');
-    });
-
-    // Deep Linking Check (Delayed to ensure socket connection or handled in connect)
-    if (initData.start_param) {
-      handleJoinLobby(initData.start_param, playerObj);
-    }
-
-    return () => {
-        unsubscribe();
-        unsubscribeErrors();
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Reset text reveal on new round/state change
-  useEffect(() => {
-     if (gameState.status !== GameStatus.RESULTS) {
-         setDisplayedText("");
-         setTextRevealed(false);
-         setRevealSpeedMultiplier(1);
-         tapCountRef.current = 0;
-     }
-     if (gameState.status !== GameStatus.PLAYER_INPUT) {
-         setDisplayedScenario("");
-         setScenarioRevealed(false);
-         setScenarioRevealSpeed(1);
-         scenarioTapCountRef.current = 0;
-     }
+      if (gameState.status === GameStatus.PLAYER_INPUT) {
+          setScenarioRevealed(false);
+          setActionInput('');
+      } else if (gameState.status === GameStatus.RESULTS) {
+          setTextRevealed(false);
+      }
   }, [gameState.status]);
 
-  // Force reveal if server says so
-  useEffect(() => {
-      if (gameState.status === GameStatus.RESULTS && gameState.resultsRevealed && gameState.roundResult) {
-          if (!textRevealed) {
-              setDisplayedText(gameState.roundResult.story);
-              setTextRevealed(true);
-          }
-      }
-  }, [gameState.status, gameState.resultsRevealed, gameState.roundResult, textRevealed]);
-
-  // Scenario Typewriter Effect
-  useEffect(() => {
-      if (gameState.status === GameStatus.PLAYER_INPUT && gameState.scenario) {
-          const fullText = gameState.scenario;
-          if (scenarioRevealed || displayedScenario.length >= fullText.length) {
-              if (!scenarioRevealed) setScenarioRevealed(true);
-              return;
-          }
-
-          const baseSpeed = 30; // ms per char
-          // Clamp speed to prevent 0ms or negative timeout
-          // Min timeout 5ms
-          const currentSpeed = Math.max(baseSpeed / scenarioRevealSpeed, 5);
-
-          const timer = setTimeout(() => {
-              setDisplayedScenario(fullText.slice(0, displayedScenario.length + 1));
-          }, currentSpeed);
-
-          return () => clearTimeout(timer);
-      }
-  }, [gameState.status, gameState.scenario, displayedScenario, scenarioRevealed, scenarioRevealSpeed]);
-
-  // Typewriter Effect
-  useEffect(() => {
-      if (gameState.status === GameStatus.RESULTS && gameState.roundResult) {
-          const fullText = gameState.roundResult.story;
-
-          if (textRevealed || displayedText.length >= fullText.length) {
-              if (!textRevealed) setTextRevealed(true);
-              return;
-          }
-
-          // Don't run effect if already revealed by server (handled by other effect)
-          if (gameState.resultsRevealed) return;
-
-          const baseSpeed = 30; // ms per char
-          const currentSpeed = baseSpeed / revealSpeedMultiplier;
-
-          const timer = setTimeout(() => {
-              setDisplayedText(fullText.slice(0, displayedText.length + 1));
-          }, currentSpeed);
-
-          return () => clearTimeout(timer);
-      }
-  }, [gameState.status, gameState.roundResult, displayedText, textRevealed, revealSpeedMultiplier, gameState.resultsRevealed]);
-
-
-  // -- Handlers --
-
   const handleScenarioTap = () => {
-      if (scenarioRevealed) return;
-      if (!user?.isCaptain) return;
-
-      scenarioTapCountRef.current += 1;
-
-      // Skip threshold: 9 taps (3 triple-taps)
-      if (scenarioTapCountRef.current >= 9) {
-           setScenarioRevealed(true);
-           setDisplayedScenario(gameState.scenario || "");
-           triggerHaptic("rigid"); // "Heavy" haptic
-           scenarioTapCountRef.current = 0;
-           return;
-      }
-
-      if (scenarioTapCountRef.current % 3 === 0) {
-          setScenarioRevealSpeed(prev => prev * 1.5);
-          triggerHaptic("medium");
+      if (!scenarioRevealed) {
+          window.Telegram?.WebApp?.HapticFeedback.impactOccurred('medium');
+          setScenarioRevealed(true);
       }
   };
 
   const handleResultsTap = () => {
-      if (textRevealed || gameState.resultsRevealed) return;
-
-      tapCountRef.current += 1;
-      if (tapCountRef.current % 3 === 0) {
-          setRevealSpeedMultiplier(prev => prev * 1.5);
-          triggerHaptic('medium');
-      }
+       if (!textRevealed) {
+           window.Telegram?.WebApp?.HapticFeedback.impactOccurred('medium');
+           setTextRevealed(true);
+       }
   };
 
-  const handleRevealResults = () => {
-      if (!gameState.lobbyCode) return;
-      SocketService.revealResults(gameState.lobbyCode);
-  };
+  // -- Render Helpers --
 
-  // DRAG SCROLL HANDLERS (Mouse Drag Logic)
-  const handleMouseDown = (e: React.MouseEvent) => {
-      if (!scrollContainerRef.current) return;
-      setIsDragging(true);
-      startX.current = e.pageX - scrollContainerRef.current.offsetLeft;
-      scrollLeftRef.current = scrollContainerRef.current.scrollLeft;
-  };
+  const displayedScenario = scenarioRevealed
+    ? (gameState.scenario || '')
+    : (gameState.scenario ? gameState.scenario.substring(0, 50) + '...' : '');
 
-  const handleMouseLeave = () => {
-      setIsDragging(false);
-  };
+  const displayedText = textRevealed
+    ? (gameState.roundResult?.story || '')
+    : (gameState.roundResult?.story ? gameState.roundResult.story.substring(0, 50) + '...' : '');
 
-  const handleMouseUp = () => {
-      setIsDragging(false);
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-      if (!isDragging || !scrollContainerRef.current) return;
-      e.preventDefault();
-      const x = e.pageX - scrollContainerRef.current.offsetLeft;
-      const walk = (x - startX.current) * 1.5; // Scroll speed multiplier
-      scrollContainerRef.current.scrollLeft = scrollLeftRef.current - walk;
-  };
-
-
-  const handleCreateLobby = async () => {
-    setErrorMsg('');
-    if (!user) return;
-
-    setLoading(true);
-
-    const currentKeyCount = getKeyCount();
-
-    // Use current persisted settings
-    const lobbySettings: LobbySettings = { 
-      ...gameState.settings
-      // apiKey removed
-    };
-
-    try {
-        // Skip validation for instant creation
-        const newUser = { ...user, isCaptain: true, keyCount: currentKeyCount };
-        await SocketService.createLobby(newUser, lobbySettings);
-        // Only update user state on success
-        setUser(newUser);
-    } catch (e: any) {
-        setErrorMsg(e.toString());
-    } finally {
-        setLoading(false);
-    }
-  };
-
-  const handleJoinLobby = async (code: string, playerObj = user) => {
-    if (!code || !playerObj) return;
-    
-    // Ensure name is consistent
-    const storedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME) || playerObj.name;
-    const currentKeyCount = getKeyCount();
-
-    const updatedPlayerObj = { ...playerObj, name: storedNick, keyCount: currentKeyCount };
-    setUser(updatedPlayerObj);
-
-    setErrorMsg('');
-    setLoading(true);
-    
-    try {
-        const success = await SocketService.joinLobby(code, updatedPlayerObj);
-        if (!success) {
-            setErrorMsg(t('lobbyNotFound', lang));
-            triggerHaptic('error');
-        }
-    } catch (e) {
-        setErrorMsg(t('lobbyNotFound', lang)); // Generic error for now
-        triggerHaptic('error');
-    } finally {
-        setLoading(false);
-    }
-  };
-
-  const handleUpdateSettings = <K extends keyof LobbySettings>(key: K, value: LobbySettings[K]) => {
-      // 1. Update Backend
-      if (gameState.lobbyCode) {
-         SocketService.updateSettings(gameState.lobbyCode, { [key]: value });
-      }
-      
-      // 2. Persist to Local Storage (Merge with current)
-      const newSettings = { ...gameState.settings, [key]: value };
-      localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(newSettings));
-  };
-
-  const handleShare = () => {
-    const url = `https://t.me/AgainstAiBot?startapp=${gameState.lobbyCode}`;
-    const text = `Join my lobby in Against AI! Code: ${gameState.lobbyCode}`;
-    const fullTgUrl = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
-
-    if (window.Telegram.WebApp.initData) {
-        window.Telegram.WebApp.openTelegramLink(fullTgUrl);
-    } else {
-        navigator.clipboard.writeText(url);
-        triggerHaptic('success');
-        setToast({ msg: t('linkCopied', lang), type: 'success' });
-    }
-  };
-
-  const handleStartGame = async () => {
-    if (!gameState.lobbyCode) return;
-
-    // Client-side check for API Key before start (for Captain)
-    // Check local storage
-    if (user?.isCaptain && !localStorage.getItem(STORAGE_KEYS.API_KEY)) {
-        setToast({ msg: "Please set a valid Gemini API Key in Settings first!", type: 'error' });
-        triggerHaptic('error');
-        return;
-    }
-
-    SocketService.startGame(gameState.lobbyCode);
-  };
-
-  // Timer Logic
-  useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
-    if (gameState.status === GameStatus.PLAYER_INPUT) {
-      interval = setInterval(() => {
-        timeLeftRef.current -= 1;
-        setTimeLeftDisplay(timeLeftRef.current);
-
-        // Haptics for last 3 seconds
-        if (timeLeftRef.current <= 3 && timeLeftRef.current > 0) {
-             triggerHaptic('warning');
-        }
-
-        if (timeLeftRef.current <= 0) {
-           clearInterval(interval);
-           // Auto-submit logic is handled by server timeout.
-           // But we can submit partial text if we want to be safe.
-           // Use Ref to avoid stale closure
-           if (actionInputRef.current.trim()) {
-               handleSubmitAction(true);
-           }
-        }
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameState.status]);
-
-  const handleSubmitAction = async (force = false) => {
-    if (!user || !gameState.lobbyCode) return;
-
-    // Use Ref for latest input
-    let currentInput = actionInputRef.current.trim();
-
-    if (!currentInput && !force) return;
-
-    setLoading(true);
-
-    if (force) {
-        if (!currentInput) {
-            currentInput = t('frozenInFear', lang);
-        }
-        currentInput += t('timeOutNote', lang);
-    }
-
-    // Server performs cheat detection now
-    SocketService.submitAction(gameState.lobbyCode, currentInput);
-
-    // Optimistic Update
-    setUser(prev => prev ? ({ ...prev, status: 'ready' }) : null);
-
-    setLoading(false);
-  };
-
-  const handleRestart = () => {
-      if (!gameState.lobbyCode) return;
-      handleActionInputChange("");
-      setErrorMsg("");
-      SocketService.resetGame(gameState.lobbyCode);
-  };
-
-  // Settings Modal Handlers
-  const openSettings = () => {
-      setSettingsNick(user?.name || '');
-      setSettingsApiKey(localStorage.getItem(STORAGE_KEYS.API_KEY) || '');
-      setSettingsNavyApiKey(localStorage.getItem(STORAGE_KEYS.NAVY_KEY) || '');
-      setShowSettingsModal(true);
-  };
-
-  const saveSettings = () => {
-      const cleanNick = settingsNick.trim();
-      const cleanKey = settingsApiKey.trim();
-      const cleanNavyKey = settingsNavyApiKey.trim();
-
-      if (!cleanNick) {
-          setToast({ msg: t('nicknameRequired', lang), type: 'error' });
-          return;
-      }
-
-      // 1. Save Nickname
-      localStorage.setItem(STORAGE_KEYS.NICKNAME, cleanNick);
-
-      // 2. Save API Keys
-      if (cleanKey) localStorage.setItem(STORAGE_KEYS.API_KEY, cleanKey);
-      else localStorage.removeItem(STORAGE_KEYS.API_KEY);
-
-      if (cleanNavyKey) localStorage.setItem(STORAGE_KEYS.NAVY_KEY, cleanNavyKey);
-      else localStorage.removeItem(STORAGE_KEYS.NAVY_KEY);
-
-      const newKeyCount = getKeyCount();
-
-      // 3. Update Player State on Server
-      if (user && gameState.lobbyCode) {
-          SocketService.updatePlayer(gameState.lobbyCode, {
-              name: cleanNick,
-              keyCount: newKeyCount
-          });
-          setUser({ ...user, name: cleanNick, keyCount: newKeyCount });
-      }
-
-      setShowSettingsModal(false);
-      setToast({ msg: t('save', lang), type: 'success' });
-      triggerHaptic('success');
-  };
+  // -- Views --
 
   if (gameState.status === GameStatus.HOME) {
-    return (
-      <div className="min-h-screen p-6 flex flex-col items-center relative">
-        <Toast toast={toast} />
-        {/* Lang Switch */}
-        <div className="absolute top-4 right-4 flex gap-2 text-sm font-bold z-10">
-            <button onClick={() => setLang('en')} className={lang === 'en' ? 'text-tg-button' : 'text-tg-hint'}>EN</button>
-            <span className="text-tg-hint">|</span>
-            <button onClick={() => setLang('ru')} className={lang === 'ru' ? 'text-tg-button' : 'text-tg-hint'}>RU</button>
-        </div>
+      return (
+          <div className="min-h-screen flex flex-col items-center justify-center p-6 space-y-8 animate-fade-in relative">
+              {/* Settings Button */}
+              <button
+                onClick={() => setShowSettingsModal(true)}
+                className="absolute top-4 right-4 p-2 text-tg-hint hover:text-tg-text transition-colors"
+              >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+              </button>
 
-        {/* Header */}
-        <div className="mt-12 mb-8 text-center space-y-2">
-            <h1 className="text-4xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-500">
-            AGAINST AI
-            </h1>
-            <p className="text-tg-hint text-xs max-w-xs mx-auto">{t('mockNote', lang)}</p>
-        </div>
+              <h1 className="text-4xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-600 drop-shadow-sm">
+                  AGAINST AI
+              </h1>
 
-        <div className="w-full max-w-sm space-y-8 animate-fade-in">
-            {/* Create Lobby Button */}
-            <Button onClick={handleCreateLobby} isLoading={loading}>
-                {t('createLobby', lang)}
-            </Button>
+              <div className="w-full max-w-xs space-y-4">
+                  <Button onClick={handleCreateLobby} isLoading={loading}>
+                      {t('createLobby', lang)}
+                  </Button>
 
-            {/* Divider */}
-            <div className="relative flex py-2 items-center">
-                <div className="flex-grow border-t border-tg-hint/20"></div>
-                <span className="flex-shrink mx-4 text-tg-hint text-xs uppercase">{t('or', lang)}</span>
-                <div className="flex-grow border-t border-tg-hint/20"></div>
-            </div>
+                  <div className="relative">
+                      <div className="absolute inset-0 flex items-center">
+                          <span className="w-full border-t border-tg-hint/20"></span>
+                      </div>
+                      <div className="relative flex justify-center text-xs uppercase">
+                          <span className="bg-tg-bg px-2 text-tg-hint">{t('or', lang)}</span>
+                      </div>
+                  </div>
 
-            {/* Join Lobby Code Input */}
-            <div className="space-y-2">
-                 <label className="text-xs text-tg-hint uppercase font-bold text-center block tracking-widest">{t('enterCode', lang)}</label>
-                 <CodeInput
-                    onComplete={(code) => handleJoinLobby(code)}
-                    hasError={!!errorMsg}
-                    disabled={loading}
-                 />
-                 {errorMsg && <p className="text-red-500 text-sm text-center font-bold animate-pulse mt-2">{errorMsg}</p>}
-            </div>
-        </div>
-      </div>
-    );
+                  <CodeInput onComplete={handleJoinLobby} label={t('enterCode', lang)} />
+              </div>
+
+              {showSettingsModal && (
+                  <SettingsModal
+                      settingsNick={settingsNick} setSettingsNick={setSettingsNick}
+                      settingsApiKey={settingsApiKey} setSettingsApiKey={setSettingsApiKey}
+                      settingsNavyApiKey={settingsNavyApiKey} setSettingsNavyApiKey={setSettingsNavyApiKey}
+                      saveSettings={handleSaveSettings} setShowSettingsModal={setShowSettingsModal}
+                      lang={lang} user={user}
+                  />
+              )}
+
+              {toast && <Toast message={toast.msg} type={toast.type} />}
+          </div>
+      );
   }
 
   if (gameState.status === GameStatus.LOBBY_WAITING || gameState.status === GameStatus.LOBBY_SETUP || gameState.status === GameStatus.LOBBY_STARTING) {
       return (
-          <div className="min-h-screen flex flex-col p-4 relative">
-              <Toast toast={toast} />
-              {showSettingsModal && (
-                  <SettingsModal
-                      settingsNick={settingsNick}
-                      setSettingsNick={setSettingsNick}
-                      settingsApiKey={settingsApiKey}
-                      setSettingsApiKey={setSettingsApiKey}
-                      settingsNavyApiKey={settingsNavyApiKey}
-                      setSettingsNavyApiKey={setSettingsNavyApiKey}
-                      saveSettings={saveSettings}
-                      setShowSettingsModal={setShowSettingsModal}
-                      lang={lang}
-                      user={user}
-                  />
-              )}
+          <div className="min-h-screen flex flex-col p-4 animate-fade-in relative">
+               {/* Header */}
+               <div className="flex justify-between items-center mb-6">
+                   <div className="flex flex-col">
+                       <span className="text-xs text-tg-hint uppercase">{t('codeLabel', lang)}</span>
+                       <span className="text-3xl font-mono font-bold tracking-widest text-tg-button select-all cursor-pointer" onClick={() => {
+                           navigator.clipboard.writeText(gameState.lobbyCode || '');
+                           setToast({ msg: t('linkCopied', lang), type: 'success' });
+                       }}>
+                           {gameState.lobbyCode}
+                       </span>
+                   </div>
+                   <button onClick={() => setShowSettingsModal(true)} className="p-2 bg-tg-secondaryBg rounded-full">
+                       ⚙️
+                   </button>
+               </div>
 
-              <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-bold">{t('lobbySetup', lang)}</h2>
-                  <div className="flex items-center gap-2">
-                       {/* Settings Button */}
-                       <button
-                         onClick={openSettings}
-                         className="p-2 rounded-full bg-tg-secondaryBg border border-tg-hint/20 text-tg-hint hover:text-tg-text transition-colors"
-                       >
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                             <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-                           </svg>
-                       </button>
+               {/* Settings Panel (Captain Only) */}
+               {user?.isCaptain ? (
+                  <div className="bg-tg-secondaryBg p-4 rounded-xl mb-6 space-y-4 shadow-lg border border-tg-hint/10">
+                      <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">{t('gameSettings', lang)}</h3>
 
-                       <div className="flex items-center gap-2 bg-tg-secondaryBg px-3 py-1 rounded-lg border border-tg-hint/20">
-                          <span className="text-xs text-tg-hint uppercase">{t('codeLabel', lang)}</span>
-                          <span className="text-xl font-mono font-bold tracking-widest select-all">{gameState.lobbyCode}</span>
-                       </div>
-                  </div>
-              </div>
-
-              {/* API Key Warning for Captain */}
-              {user?.isCaptain && !localStorage.getItem(STORAGE_KEYS.API_KEY) && (
-                  <div className="bg-red-500/10 border border-red-500/50 p-3 rounded-xl mb-4 text-center animate-pulse">
-                      <p className="text-red-500 text-xs font-bold">{t('missingApiKey', lang)}</p>
-                      <p className="text-tg-hint text-[10px]">{t('missingApiKeyDesc', lang)}</p>
-                  </div>
-              )}
-
-              <div className="bg-tg-secondaryBg p-5 rounded-2xl border border-tg-hint/10 space-y-4 mb-4">
-                  <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">{t('gameSettings', lang)}</h3>
-
-                  {/* Scenario Type Selection */}
-                  <div
-                    className="flex overflow-x-auto space-x-3 pb-2 scrollbar-hide cursor-grab active:cursor-grabbing"
-                    ref={scrollContainerRef}
-                    onMouseDown={handleMouseDown}
-                    onMouseLeave={handleMouseLeave}
-                    onMouseUp={handleMouseUp}
-                    onMouseMove={handleMouseMove}
-                  >
-                      {Object.values(ScenarioType).map(type => (
-                          <button
-                            key={type}
-                            onClick={() => handleUpdateSettings('scenarioType', type)}
-                            disabled={!user?.isCaptain}
-                            className={`flex-shrink-0 px-4 py-2 rounded-xl border transition-all ${gameState.settings.scenarioType === type
-                                ? 'bg-tg-button text-white border-transparent shadow-lg scale-105'
-                                : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'}`}
-                          >
-                              {type.replace(/_/g, ' ').toUpperCase()}
-                          </button>
-                      ))}
-                  </div>
-
-                  {/* Mode Selection */}
-                  <div className="grid grid-cols-3 gap-2">
-                      {Object.values(GameMode).map(mode => (
-                          <button
-                            key={mode}
-                            onClick={() => handleUpdateSettings('mode', mode)}
-                            disabled={!user?.isCaptain}
-                            className={`py-2 text-xs font-bold uppercase rounded-lg border transition-all ${gameState.settings.mode === mode
-                                ? 'bg-tg-button text-white border-transparent'
-                                : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'}`}
-                          >
-                              {mode === GameMode.BATTLE_ROYALE ? 'ROYALE' : mode}
-                          </button>
-                      ))}
-                  </div>
-
-                  {/* Language Selection */}
-                  <div>
-                      <div className="flex justify-between text-sm mb-2">
-                          <span>{t('storyLanguage', lang)}</span>
+                      {/* Mode & Scenario */}
+                      <div className="grid grid-cols-2 gap-3">
+                          <div>
+                              <label className="text-[10px] text-tg-hint uppercase font-bold">{t('gameMode', lang)}</label>
+                              <select
+                                className="w-full bg-tg-bg p-2 rounded text-sm mt-1 border border-tg-hint/20 focus:border-tg-button outline-none"
+                                value={gameState.settings.mode}
+                                onChange={(e) => handleUpdateSettings('mode', e.target.value)}
+                              >
+                                  <option value={GameMode.COOP}>{t('coop', lang)}</option>
+                                  <option value={GameMode.PVP}>{t('pvp', lang)}</option>
+                                  <option value={GameMode.BATTLE_ROYALE}>{t('battleRoyale', lang)}</option>
+                              </select>
+                          </div>
+                          <div>
+                              <label className="text-[10px] text-tg-hint uppercase font-bold">{t('scenarioType', lang)}</label>
+                              <select
+                                className="w-full bg-tg-bg p-2 rounded text-sm mt-1 border border-tg-hint/20 focus:border-tg-button outline-none"
+                                value={gameState.settings.scenarioType}
+                                onChange={(e) => handleUpdateSettings('scenarioType', e.target.value)}
+                              >
+                                  <option value={ScenarioType.ANY}>{t('any', lang)}</option>
+                                  <option value={ScenarioType.SCI_FI}>{t('scifi', lang)}</option>
+                                  <option value={ScenarioType.SUPERNATURAL}>{t('supernatural', lang)}</option>
+                                  <option value={ScenarioType.APOCALYPSE}>{t('apocalypse', lang)}</option>
+                                  <option value={ScenarioType.FANTASY}>{t('fantasy', lang)}</option>
+                                  <option value={ScenarioType.CYBERPUNK}>{t('cyberpunk', lang)}</option>
+                                  <option value={ScenarioType.BACKROOMS}>{t('backrooms', lang)}</option>
+                                  <option value={ScenarioType.SCP}>{t('scp', lang)}</option>
+                                  <option value={ScenarioType.MINECRAFT}>{t('minecraft', lang)}</option>
+                                  <option value={ScenarioType.HARRY_POTTER}>{t('harryPotter', lang)}</option>
+                              </select>
+                          </div>
                       </div>
-                      <div className="flex gap-2 p-1 bg-tg-bg rounded-lg">
-                          <button
-                            onClick={() => handleUpdateSettings('storyLanguage', 'en')}
-                            disabled={!user?.isCaptain}
-                            className={`flex-1 py-1 text-sm rounded-md transition-colors ${gameState.settings.storyLanguage === 'en' ? 'bg-tg-button text-white' : 'text-tg-hint opacity-70'}`}
-                          >
-                            English
-                          </button>
-                          <button
-                            onClick={() => handleUpdateSettings('storyLanguage', 'ru')}
-                            disabled={!user?.isCaptain}
-                            className={`flex-1 py-1 text-sm rounded-md transition-colors ${gameState.settings.storyLanguage === 'ru' ? 'bg-tg-button text-white' : 'text-tg-hint opacity-70'}`}
-                          >
-                            Русский
-                          </button>
-                      </div>
-                  </div>
 
-                  {/* AI Model Level */}
-                  <div>
-                      <div className="flex justify-between text-sm mb-2">
-                          <span>{t('aiLevel', lang)}</span>
+                      {/* Language & AI Level */}
+                      <div className="grid grid-cols-2 gap-3">
+                          <div>
+                              <label className="text-[10px] text-tg-hint uppercase font-bold">{t('storyLanguage', lang)}</label>
+                              <select
+                                className="w-full bg-tg-bg p-2 rounded text-sm mt-1 border border-tg-hint/20 focus:border-tg-button outline-none"
+                                value={gameState.settings.storyLanguage || 'en'}
+                                onChange={(e) => handleUpdateSettings('storyLanguage', e.target.value)}
+                              >
+                                  <option value="en">English</option>
+                                  <option value="ru">Русский</option>
+                              </select>
+                          </div>
+                          <div>
+                              <label className="text-[10px] text-tg-hint uppercase font-bold">{t('aiLevel', lang)}</label>
+                              <select
+                                className="w-full bg-tg-bg p-2 rounded text-sm mt-1 border border-tg-hint/20 focus:border-tg-button outline-none"
+                                value={gameState.settings.aiModelLevel}
+                                onChange={(e) => handleUpdateSettings('aiModelLevel', e.target.value)}
+                              >
+                                  <option value={AIModelLevel.ECONOMY}>{t('economy', lang)}</option>
+                                  <option value={AIModelLevel.BALANCED}>{t('balanced', lang)}</option>
+                                  <option value={AIModelLevel.PREMIUM}>{t('premium', lang)}</option>
+                              </select>
+                          </div>
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
-                          {(['economy', 'balanced', 'premium'] as AIModelLevel[]).map((level) => (
-                             <button
-                                key={level}
-                                onClick={() => handleUpdateSettings('aiModelLevel', level)}
-                                disabled={!user?.isCaptain}
-                                className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
-                                    ${gameState.settings.aiModelLevel === level
-                                        ? 'bg-tg-button text-white border-transparent'
-                                        : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
-                                    }
-                                    ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
-                                `}
-                             >
-                                 <span>{t(level, lang)}</span>
-                                 <span className="text-[8px] opacity-70 normal-case leading-tight max-w-full overflow-hidden text-ellipsis">
-                                     {level === 'economy' && t('economyDesc', lang)}
-                                     {level === 'balanced' && t('balancedDesc', lang)}
-                                     {level === 'premium' && t('premiumDesc', lang)}
-                                 </span>
-                             </button>
-                          ))}
-                      </div>
-                  </div>
 
-                  {/* Image Generation Mode */}
-                  <div>
-                      <div className="flex justify-between text-sm mb-2">
-                  {/* Voiceover Settings */}
-                  <div>
-                      <div className="flex justify-between text-sm mb-2">
-                          <span>Voiceover (API.NAVY)</span>
+                      {/* Time & Chars */}
+                      <div className="grid grid-cols-2 gap-3">
+                           <div>
+                               <label className="text-[10px] text-tg-hint uppercase font-bold flex justify-between">
+                                   <span>{t('timeLimit', lang)}</span>
+                                   <span>{gameState.settings.timeLimitSeconds}s</span>
+                               </label>
+                               <input
+                                  type="range"
+                                  min={MIN_TIME} max={MAX_TIME} step={10}
+                                  value={gameState.settings.timeLimitSeconds}
+                                  onChange={(e) => handleUpdateSettings('timeLimitSeconds', parseInt(e.target.value))}
+                                  className="w-full h-2 bg-tg-bg rounded-lg appearance-none cursor-pointer mt-2"
+                               />
+                           </div>
+                           <div>
+                               <label className="text-[10px] text-tg-hint uppercase font-bold flex justify-between">
+                                   <span>{t('charLimit', lang)}</span>
+                                   <span>{gameState.settings.charLimit}</span>
+                               </label>
+                               <input
+                                  type="range"
+                                  min={MIN_CHARS} max={MAX_CHARS} step={100}
+                                  value={gameState.settings.charLimit}
+                                  onChange={(e) => handleUpdateSettings('charLimit', parseInt(e.target.value))}
+                                  className="w-full h-2 bg-tg-bg rounded-lg appearance-none cursor-pointer mt-2"
+                               />
+                           </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 mb-4">
-                           {/* Scenario Voiceover */}
-                           <button
-                              onClick={() => handleUpdateSettings('voiceoverScenario', !gameState.settings.voiceoverScenario)}
-                              disabled={!user?.isCaptain}
-                              className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
-                                  ${gameState.settings.voiceoverScenario
-                                      ? 'bg-tg-button text-white border-transparent'
-                                      : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
-                                  }
-                                  ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
-                              `}
-                           >
-                               <span>{t('voiceoverScenario', lang)}</span>
-                               {gameState.settings.voiceoverScenario && <span className="text-[8px] text-yellow-300 font-bold">{t('expensive', lang)}</span>}
-                           </button>
 
-                           {/* Results Voiceover */}
-                           <button
-                              onClick={() => handleUpdateSettings('voiceoverResults', !gameState.settings.voiceoverResults)}
-                              disabled={!user?.isCaptain}
-                              className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
-                                  ${gameState.settings.voiceoverResults
-                                      ? 'bg-tg-button text-white border-transparent'
-                                      : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
-                                  }
-                                  ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
-                              `}
-                           >
-                               <span>{t('voiceoverResults', lang)}</span>
-                               {gameState.settings.voiceoverResults && <span className="text-[8px] text-yellow-300 font-bold">{t('expensive', lang)}</span>}
-                           </button>
-                      </div>
-                  </div>
+                      {/* Voiceover Settings (Moved here as sibling) */}
+                      <div>
+                          <div className="flex justify-between text-sm mb-2">
+                              <span>{t('voiceoverScenario', lang) && "Voiceover (API.NAVY)"}</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 mb-4">
+                               {/* Scenario Voiceover */}
+                               <button
+                                  onClick={() => handleUpdateSettings('voiceoverScenario', !gameState.settings.voiceoverScenario)}
+                                  className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
+                                      ${gameState.settings.voiceoverScenario
+                                          ? 'bg-tg-button text-white border-transparent'
+                                          : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
+                                      }
+                                  `}
+                               >
+                                   <span>{t('voiceoverScenario', lang)}</span>
+                                   {gameState.settings.voiceoverScenario && <span className="text-[8px] text-yellow-300 font-bold">{t('expensive', lang)}</span>}
+                               </button>
 
-                          <span>{t('imageGenerationMode', lang)}</span>
+                               {/* Results Voiceover */}
+                               <button
+                                  onClick={() => handleUpdateSettings('voiceoverResults', !gameState.settings.voiceoverResults)}
+                                  className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
+                                      ${gameState.settings.voiceoverResults
+                                          ? 'bg-tg-button text-white border-transparent'
+                                          : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
+                                      }
+                                  `}
+                               >
+                                   <span>{t('voiceoverResults', lang)}</span>
+                                   {gameState.settings.voiceoverResults && <span className="text-[8px] text-yellow-300 font-bold">{t('expensive', lang)}</span>}
+                               </button>
+                          </div>
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
-                          {(['none', 'scenario', 'full'] as ImageGenerationMode[]).map((mode) => (
-                             <button
-                                key={mode}
-                                onClick={() => handleUpdateSettings('imageGenerationMode', mode)}
-                                disabled={!user?.isCaptain}
-                                className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
-                                    ${gameState.settings.imageGenerationMode === mode
-                                        ? 'bg-tg-button text-white border-transparent'
-                                        : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
-                                    }
-                                    ${!user?.isCaptain ? 'opacity-50 cursor-not-allowed' : ''}
-                                `}
-                             >
-                                 <span>
-                                     {mode === 'none' && t('imgNone', lang)}
-                                     {mode === 'scenario' && t('imgScenario', lang)}
-                                     {mode === 'full' && t('imgFull', lang)}
-                                 </span>
-                                 <span className="text-[8px] opacity-70 normal-case leading-tight max-w-full overflow-hidden text-ellipsis">
-                                     {mode === 'none' && t('imgNoneDesc', lang)}
-                                     {mode === 'scenario' && t('imgScenarioDesc', lang)}
-                                     {mode === 'full' && t('imgFullDesc', lang)}
-                                 </span>
-                             </button>
-                          ))}
+
+                      {/* Image Generation Mode */}
+                      <div>
+                          <div className="flex justify-between text-sm mb-2">
+                              <span>{t('imageGenerationMode', lang)}</span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                              {(['none', 'scenario', 'full'] as ImageGenerationMode[]).map((mode) => (
+                                 <button
+                                    key={mode}
+                                    onClick={() => handleUpdateSettings('imageGenerationMode', mode)}
+                                    className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
+                                        ${gameState.settings.imageGenerationMode === mode
+                                            ? 'bg-tg-button text-white border-transparent'
+                                            : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
+                                        }
+                                    `}
+                                 >
+                                     <span>
+                                         {mode === 'none' && t('imgNone', lang)}
+                                         {mode === 'scenario' && t('imgScenario', lang)}
+                                         {mode === 'full' && t('imgFull', lang)}
+                                     </span>
+                                     <span className="text-[8px] opacity-70 normal-case leading-tight max-w-full overflow-hidden text-ellipsis">
+                                         {mode === 'none' && t('imgNoneDesc', lang)}
+                                         {mode === 'scenario' && t('imgScenarioDesc', lang)}
+                                         {mode === 'full' && t('imgFullDesc', lang)}
+                                     </span>
+                                 </button>
+                              ))}
+                          </div>
                       </div>
                   </div>
-              </div>
+               ) : (
+                  // Read-Only Settings for Non-Captains
+                  <div className="bg-tg-secondaryBg p-4 rounded-xl mb-6 text-center shadow border border-tg-hint/10">
+                      <p className="text-sm text-tg-hint">{t('lobbySetup', lang)}</p>
+                      <div className="flex justify-center gap-4 mt-2">
+                          <span className="px-2 py-1 bg-tg-bg rounded text-xs border border-tg-hint/20">
+                              {gameState.settings.mode === GameMode.COOP && t('coop', lang)}
+                              {gameState.settings.mode === GameMode.PVP && t('pvp', lang)}
+                              {gameState.settings.mode === GameMode.BATTLE_ROYALE && t('battleRoyale', lang)}
+                          </span>
+                          <span className="px-2 py-1 bg-tg-bg rounded text-xs border border-tg-hint/20">{gameState.settings.timeLimitSeconds}s</span>
+                      </div>
+                  </div>
+               )}
 
               <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">{t('players', lang)}</h3>
-              <div className="flex-grow space-y-2 overflow-y-auto">
-                  {gameState.players.map(p => (
-                      <div key={p.id} className={`flex items-center p-3 bg-tg-secondaryBg rounded-lg ${!p.isOnline ? 'opacity-50' : ''}`}>
-                          <div className={`w-3 h-3 rounded-full mr-3 ${p.status === 'ready' ? 'bg-green-500' : 'bg-gray-500'}`} />
-                          <span className="font-medium">{p.name}</span>
-                          {/* API Key Indicators - explicit comparison */}
-                          <div className="ml-2 flex gap-1">
-                              {p.keyCount >= 1 ? <span className="text-green-500 text-xs">✓</span> : null}
-                              {p.keyCount >= 2 ? <span className="text-green-500 text-xs">✓</span> : null}
+              <div className="grid grid-cols-1 gap-2">
+                  {gameState.players.map((p) => (
+                      <div key={p.id} className={`flex items-center p-3 rounded-lg bg-tg-secondaryBg border ${p.id === user?.id ? 'border-tg-button' : 'border-transparent'} ${!p.isOnline ? 'opacity-50' : ''}`}>
+                          {p.avatarUrl ? (
+                              <img src={p.avatarUrl} className="w-8 h-8 rounded-full mr-3" />
+                          ) : (
+                              <div className="w-8 h-8 rounded-full bg-tg-bg flex items-center justify-center mr-3 text-xs font-bold">
+                                  {p.name.charAt(0)}
+                              </div>
+                          )}
+                          <div className="flex flex-col">
+                              <span className="text-sm font-bold">{p.name} {p.id === user?.id && '(You)'}</span>
+                              <div className="flex space-x-1">
+                                  <div className={`w-2 h-2 rounded-full ${p.keyCount > 0 ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                  {p.keyCount === 2 && <div className="w-2 h-2 rounded-full bg-blue-500"></div>}
+                              </div>
                           </div>
                           {!p.isOnline && <span className="ml-2 text-xs text-red-500 font-bold">[OFFLINE]</span>}
                           {p.isCaptain && <span className="ml-auto text-xs text-yellow-500">👑 Captain</span>}
@@ -961,6 +794,17 @@ const App: React.FC = () => {
                      {t('shareInvite', lang)}
                  </Button>
               </div>
+
+              {showSettingsModal && (
+                  <SettingsModal
+                      settingsNick={settingsNick} setSettingsNick={setSettingsNick}
+                      settingsApiKey={settingsApiKey} setSettingsApiKey={setSettingsApiKey}
+                      settingsNavyApiKey={settingsNavyApiKey} setSettingsNavyApiKey={setSettingsNavyApiKey}
+                      saveSettings={handleSaveSettings} setShowSettingsModal={setShowSettingsModal}
+                      lang={lang} user={user}
+                  />
+              )}
+              {toast && <Toast message={toast.msg} type={toast.type} />}
           </div>
       );
   }

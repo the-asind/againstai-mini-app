@@ -89,10 +89,13 @@ class SocketServiceImpl {
       });
   }
 
-  public async validateNavyApiKey(apiKey: string): Promise<NavyUsageResponse | null> {
+  public async validateNavyApiKey(apiKey: string, code?: string): Promise<NavyUsageResponse | null> {
       this.connect();
       return new Promise((resolve) => {
-          this.socket?.emit('validate_navy_key', { apiKey }, (response: { usage: NavyUsageResponse | null }) => {
+          // If code is not provided but we have a session code, use it.
+          const lobbyCode = code || this.currentLobbyCode || undefined;
+
+          this.socket?.emit('validate_navy_key', { apiKey, code: lobbyCode }, (response: { usage: NavyUsageResponse | null }) => {
               resolve(response.usage);
           });
       });

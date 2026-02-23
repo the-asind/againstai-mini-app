@@ -40,6 +40,7 @@ const lobbyService = new LobbyService(io);
 declare module 'socket.io' {
   interface Socket {
     telegramUser?: TelegramUser;
+    lastNavyCheck?: number; // Rate limiting timestamp
   }
 }
 
@@ -84,6 +85,21 @@ io.on('connection', (socket) => {
   });
 
   socket.on('validate_navy_key', async ({ apiKey, code }: { apiKey: string, code?: string }, callback) => {
+      if (!callback) return;
+
+      // Input Validation
+      if (!apiKey || typeof apiKey !== 'string' || apiKey.trim() === '') {
+          return callback({ usage: null, error: "Invalid API Key format" });
+      }
+
+      // Rate Limiting (Simple Token Bucket / Timestamp)
+      const now = Date.now();
+      const lastCheck = socket.lastNavyCheck || 0;
+      if (now - lastCheck < 2000) { // Limit to 1 request every 2 seconds per socket
+          return callback({ usage: null, error: "Rate limit exceeded. Please wait." });
+      }
+      socket.lastNavyCheck = now;
+
       const usage = await NavyService.getUsage(apiKey);
 
       if (usage && code && lobbyService.isPlayerInLobby(code, user.id.toString())) {
@@ -95,7 +111,7 @@ io.on('connection', (socket) => {
           });
       }
 
-      if (callback) callback({ usage });
+      callback({ usage });
   });
 
   socket.on('create_lobby', ({ player, settings }: { player: Player, settings: LobbySettings }, callback) => {
