@@ -61,6 +61,7 @@ describe("NavyService", () => {
 
      const operation = mock((key) => Promise.resolve("success"));
 
+     // k1 should be filtered out
      await NavyService.executeWithSmartAllocation(['k1', 'k2', 'k3'], 'VOICE', operation);
 
      // Should have picked k3 (highest)
@@ -84,14 +85,43 @@ describe("NavyService", () => {
      expect(operation).toHaveBeenCalledWith('k2');
   });
 
-  test("executeWithSmartAllocation falls back on 500 error", async () => {
+  test("executeWithSmartAllocation retries on 500 error with SAME key before fallback", async () => {
      global.fetch = mockFetch({
          'k1': 10000,
          'k2': 60000,
          'k3': 100000
      }) as any;
 
-     // First call (k3) fails with 500, second (k2) succeeds
+     let callCountK3 = 0;
+
+     // k3 (best) fails with 500 TWICE, then succeeds
+     const operation = mock((key) => {
+         if (key === 'k3') {
+             callCountK3++;
+             if (callCountK3 <= 2) {
+                 return Promise.reject({ status: 500 });
+             }
+         }
+         return Promise.resolve("success");
+     });
+
+     await NavyService.executeWithSmartAllocation(['k1', 'k2', 'k3'], 'VOICE', operation);
+
+     // Expect 3 calls total, ALL with k3
+     expect(operation).toHaveBeenCalledTimes(3);
+     expect(operation).toHaveBeenCalledWith('k3');
+     // Should NOT have called k2 yet
+     expect(callCountK3).toBe(3);
+  }, 10000); // 10s timeout
+
+  test("executeWithSmartAllocation falls back to next key after exhausting 500 retries", async () => {
+     global.fetch = mockFetch({
+         'k1': 10000,
+         'k2': 60000,
+         'k3': 100000
+     }) as any;
+
+     // k3 fails 500 FOREVER
      const operation = mock((key) => {
          if (key === 'k3') return Promise.reject({ status: 500 });
          return Promise.resolve("success");
@@ -99,10 +129,10 @@ describe("NavyService", () => {
 
      await NavyService.executeWithSmartAllocation(['k1', 'k2', 'k3'], 'VOICE', operation);
 
-     expect(operation).toHaveBeenCalledTimes(2);
-     expect(operation).toHaveBeenCalledWith('k3');
-     expect(operation).toHaveBeenCalledWith('k2');
-  });
+     // Expect 1 (initial) + 3 (retries) for k3 = 4 calls
+     // THEN 1 call for k2 = 5 calls total
+     expect(operation).toHaveBeenCalledTimes(5);
+  }, 10000); // 10s timeout
 
   test("executeWithSmartAllocation aborts on 429 for VOICE (strict)", async () => {
      global.fetch = mockFetch({
@@ -125,10 +155,10 @@ describe("NavyService", () => {
          }
      }
 
-     expect(operation).toHaveBeenCalledTimes(1); // Only tried k2
+     expect(operation).toHaveBeenCalledTimes(1); // Only tried k2, NO retries on 429
   });
 
-  test("executeWithSmartAllocation retries on 429 for IMAGE (fallback allowed)", async () => {
+  test("executeWithSmartAllocation retries on 429 for IMAGE (fallback allowed, no backoff loop)", async () => {
       global.fetch = mockFetch({
           'k1': 8000,  // Valid, lowest
           'k2': 20000  // Valid, higher
