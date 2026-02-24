@@ -33,7 +33,7 @@ export class NavyService {
       const data = await response.json() as NavyUsageResponse;
       return data;
     } catch (error: unknown) {
-      if (typeof error === 'object' && error !== null && 'name' in error && (error as any).name === 'AbortError') {
+      if (error instanceof Error && error.name === 'AbortError') {
           console.error(`[NavyService] Usage fetch timed out for key ending in ...${apiKey.slice(-4)}`);
       } else {
           console.error(`[NavyService] Usage fetch error for key ending in ...${apiKey.slice(-4)}:`, error);
@@ -73,7 +73,6 @@ export class NavyService {
         if (stats) {
             usageMap.set(key, stats.usage.tokens_remaining_today);
         } else {
-            // If check fails, exclude it to prevent blind errors.
             console.warn(`[NavyService] Excluding key ...${key.slice(-4)} due to usage check failure.`);
         }
     }));
@@ -88,7 +87,6 @@ export class NavyService {
 
     if (taskType === 'VOICE') {
         const cost = this.VOICE_COST;
-        // Filter out keys that definitely don't have enough tokens for even ONE voiceover
         const sufficientKeys = validKeys.filter(k => (usageMap.get(k) || 0) >= cost);
 
         if (sufficientKeys.length === 0) {
@@ -111,7 +109,7 @@ export class NavyService {
         }
     }
 
-    // 3. Execute with Fallback Logic
+    // 3. Execute with Retry Logic
     let lastError: unknown = new Error("No keys available.");
     const MAX_RETRIES_SAME_KEY = 3;
 
@@ -119,28 +117,34 @@ export class NavyService {
         const key = sortedKeys[i];
         const tokens = usageMap.get(key) || 0;
         let attempt = 0;
-        let success = false;
-        let result: T | undefined;
 
-        while (attempt <= MAX_RETRIES_SAME_KEY && !success) {
+        while (attempt <= MAX_RETRIES_SAME_KEY) {
             try {
                 if (attempt > 0) console.log(`[NavyService] Retry attempt ${attempt} for key ...${key.slice(-4)}`);
                 console.log(`[NavyService] Attempting ${taskType} with key ...${key.slice(-4)} (${tokens} tokens)`);
-                result = await operation(key);
-                success = true;
-                return result;
+                return await operation(key);
             } catch (error: unknown) {
                 lastError = error;
 
-                // Safe Error Parsing
+                // Safe Error Parsing with Type Narrowing
                 let status = 0;
                 let message = "";
 
                 if (typeof error === 'object' && error !== null) {
-                    if ('status' in error) status = (error as any).status;
-                    else if ('response' in error && typeof (error as any).response === 'object' && 'status' in (error as any).response) status = (error as any).response.status;
+                    const err = error as { status?: number; response?: unknown; message?: unknown };
 
-                    if ('message' in error) message = (error as any).message || "";
+                    if ('status' in err && typeof err.status === 'number') {
+                        status = err.status;
+                    } else if (typeof err.response === 'object' && err.response !== null) {
+                        const resp = err.response as { status?: number };
+                        if ('status' in resp && typeof resp.status === 'number') {
+                            status = resp.status;
+                        }
+                    }
+
+                    if ('message' in err && typeof err.message === 'string') {
+                        message = err.message || "";
+                    }
                 }
 
                 // Check for 429 (Too Many Requests) or 402/403 (Quota/Payment)
@@ -151,32 +155,26 @@ export class NavyService {
                     console.warn(`[NavyService] Key ...${key.slice(-4)} failed with Quota/Rate Limit.`);
 
                     if (taskType === 'VOICE') {
-                        // "If TTS and largest key shows 429... trying smaller keys is useless."
-                        // Since we sorted DESC, any subsequent key is "smaller" (or equal).
-                        // So we abort.
                         throw new Error(`Navy Voice generation failed: Best key exhausted quota (${tokens} tokens). Aborting per policy.`);
                     }
-                    // For IMAGE: We sorted ASC. If a small key fails quota (maybe it was just on the edge?),
-                    // the next key is LARGER. So we CAN continue.
+                    // For IMAGE: break retry loop to try next key
                     break;
                 } else if (isServerError) {
                     console.warn(`[NavyService] Key ...${key.slice(-4)} failed with Server Error (5xx).`);
                     attempt++;
                     if (attempt <= MAX_RETRIES_SAME_KEY) {
-                        const delay = Math.pow(2, attempt) * 100; // REDUCED for tests: 100ms, 200ms, 400ms (Total ~700ms)
+                        // Delay: 100ms, 200ms, 400ms (for tests/fast recovery)
+                        const delay = Math.pow(2, attempt - 1) * 500;
                         console.log(`[NavyService] Waiting ${delay}ms before retry...`);
                         await new Promise(r => setTimeout(r, delay));
                         continue; // Retry same key
                     } else {
                         console.warn(`[NavyService] Key ...${key.slice(-4)} exhausted 5xx retries. Trying next key...`);
-                        // Continue to next key
-                        break;
+                        break; // Try next key
                     }
                 } else {
-                    // Other errors (400 Bad Request, 401 Unauthorized) -> Probably fatal for this key, try next?
-                    // If 401 (Invalid Key), definitely try next.
                     console.warn(`[NavyService] Key ...${key.slice(-4)} failed with error: ${message}.`);
-                    break;
+                    break; // Fatal error, try next key
                 }
             }
         }
