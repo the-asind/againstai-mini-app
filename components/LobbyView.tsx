@@ -68,6 +68,21 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
     { id: 'premium' as AIModelLevel, label: 'PRO', desc: 'Max Intelligence' },
   ];
 
+  // Derive canEdit:
+  // 1. If user object has isCaptain = true
+  // 2. OR if we find our ID in the player list and that player is captain
+  // 3. OR fallback: if there is only 1 player in the lobby, assume they are captain (UI-side only, server validates actual actions)
+  const isCaptain = React.useMemo(() => {
+      if (!user) return false;
+      if (user.isCaptain) return true;
+      const meInLobby = gameState.players.find(p => p.id === user.id);
+      if (meInLobby?.isCaptain) return true;
+      if (gameState.players.length === 1 && gameState.players[0].id === user.id) return true;
+      return false;
+  }, [user, gameState.players]);
+
+  const canEdit = isCaptain;
+
   // Helper for voice options
   const isVoiceScenario = gameState.settings.voiceoverScenario;
   const isVoiceResults = gameState.settings.voiceoverResults;
@@ -99,13 +114,22 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   };
 
   const handleShare = () => {
-      const link = `https://t.me/AgainstAI_Bot/app?startapp=${gameState.lobbyCode}`;
-      navigator.clipboard.writeText(link);
-      // Ideally show toast
-      alert('Link copied to clipboard');
-  };
+      const lobbyCode = gameState.lobbyCode;
+      const link = `https://t.me/AgainstAI_Bot/app?startapp=${lobbyCode}`;
+      const text = `Join my lobby in Against AI! Code: ${lobbyCode}`;
+      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
 
-  const canEdit = user?.isCaptain;
+      // Try Telegram Web App API first
+      if (window.Telegram?.WebApp?.openTelegramLink) {
+          window.Telegram.WebApp.openTelegramLink(shareUrl);
+      } else {
+          // Fallback to clipboard
+          navigator.clipboard.writeText(link);
+          alert('Link copied to clipboard (Open Telegram manually if not redirected)');
+          // Try window.open as backup
+          window.open(shareUrl, '_blank');
+      }
+  };
 
   return (
     <div className="min-h-screen p-4 pb-32 font-sans selection:bg-game-accent/30 max-w-5xl mx-auto relative z-10 text-white">
@@ -135,7 +159,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                         handleShare();
                     }
                 }}
-                aria-label="Copy lobby code"
+                aria-label="Share lobby code"
                 tabIndex={0}
             >
                 {gameState.lobbyCode}
