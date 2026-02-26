@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Terminal, Users, Cpu, Fingerprint, Crosshair, Share2, Play, AlertTriangle, Eye, Volume2, Globe, Check, Crown, ChevronDown, Settings, X } from 'lucide-react';
+import { Terminal, Users, Cpu, Fingerprint, Crosshair, Play, AlertTriangle, Eye, Volume2, Globe, Check, Crown, ChevronDown, Settings, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GameState, Player, GameMode, ScenarioType, ImageGenerationMode, LobbySettings, Language, AIModelLevel } from '../types';
+import { GameState, Player, GameMode, ScenarioType, ImageGenerationMode, LobbySettings, Language, AIModelLevel, NavyUsageResponse } from '../types';
+import { t, translations } from '../i18n';
+import { SocketService } from '../services/socketService';
 
 interface LobbyViewProps {
     gameState: GameState;
@@ -14,6 +16,47 @@ interface LobbyViewProps {
     initialNavyKey: string;
     initialLang: Language;
 }
+
+// Define translation key type for safety
+type TranslationKey = keyof typeof translations['en'];
+
+// --- Configuration Constants ---
+
+const GENRES: { id: ScenarioType, label: TranslationKey }[] = [
+    { id: ScenarioType.ANY, label: 'any' },
+    { id: ScenarioType.SCI_FI, label: 'scifi' },
+    { id: ScenarioType.SUPERNATURAL, label: 'supernatural' },
+    { id: ScenarioType.APOCALYPSE, label: 'apocalypse' },
+    { id: ScenarioType.FANTASY, label: 'fantasy' },
+    { id: ScenarioType.CYBERPUNK, label: 'cyberpunk' },
+    { id: ScenarioType.BACKROOMS, label: 'backrooms' },
+    { id: ScenarioType.SCP, label: 'scp' },
+    { id: ScenarioType.MINECRAFT, label: 'minecraft' },
+    { id: ScenarioType.HARRY_POTTER, label: 'harryPotter' },
+];
+
+const MODES: { id: GameMode, label: TranslationKey }[] = [
+    { id: GameMode.COOP, label: 'coop' },
+    { id: GameMode.PVP, label: 'pvp' },
+    { id: GameMode.BATTLE_ROYALE, label: 'battleRoyale' }
+];
+
+const AI_LEVELS: { id: AIModelLevel, label: TranslationKey, desc: TranslationKey }[] = [
+    { id: AIModelLevel.ECONOMY, label: 'economy', desc: 'economyDesc' },
+    { id: AIModelLevel.BALANCED, label: 'balanced', desc: 'balancedDesc' },
+    { id: AIModelLevel.PREMIUM, label: 'premium', desc: 'premiumDesc' },
+];
+
+const VOICE_OPTIONS: { id: 'SCENARIO' | 'RESULTS'; label: TranslationKey }[] = [
+    { id: 'SCENARIO', label: 'voiceoverScenario' },
+    { id: 'RESULTS', label: 'voiceoverResults' }
+];
+
+const IMAGE_OPTIONS: { id: ImageGenerationMode; label: TranslationKey }[] = [
+    { id: ImageGenerationMode.NONE, label: 'imgNone' },
+    { id: ImageGenerationMode.SCENARIO, label: 'imgScenario' },
+    { id: ImageGenerationMode.FULL, label: 'imgFull' }
+];
 
 export const LobbyView: React.FC<LobbyViewProps> = ({
     gameState,
@@ -35,7 +78,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   const [navyKey, setNavyKey] = useState(initialNavyKey);
   const [interfaceLang, setInterfaceLang] = useState<Language>(initialLang);
 
-  // Update local settings state when props change (if needed, e.g. external update)
+  // Navy Stats State
+  const [navyStats, setNavyStats] = useState<NavyUsageResponse | null>(null);
+
+  // Update local settings state when props change
   useEffect(() => {
       setNickname(initialNick);
       setGeminiKey(initialApiKey);
@@ -43,41 +89,49 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
       setInterfaceLang(initialLang);
   }, [initialNick, initialApiKey, initialNavyKey, initialLang]);
 
-  const genres = [
-    { id: ScenarioType.ANY, label: '🎲 Any / Случайно' },
-    { id: ScenarioType.SCI_FI, label: 'Sci-Fi / Космос' },
-    { id: ScenarioType.SUPERNATURAL, label: 'Supernatural / Сверхъестественное' },
-    { id: ScenarioType.APOCALYPSE, label: 'Apocalypse / Апокалипсис' },
-    { id: ScenarioType.FANTASY, label: 'Dark Fantasy / Темное Фэнтези' },
-    { id: ScenarioType.CYBERPUNK, label: 'Cyberpunk / Киберпанк' },
-    { id: ScenarioType.BACKROOMS, label: 'Backrooms / Закулисье' },
-    { id: ScenarioType.SCP, label: 'SCP Foundation' },
-    { id: ScenarioType.MINECRAFT, label: 'Minecraft' },
-    { id: ScenarioType.HARRY_POTTER, label: 'Harry Potter / Гарри Поттер' },
-  ];
+  // Effect to validate key with stale closure guard (Navy Stats)
+  useEffect(() => {
+      let isCancelled = false;
 
-  const modes = [
-      { id: GameMode.COOP, label: 'COOP' },
-      { id: GameMode.PVP, label: 'PVP' },
-      { id: GameMode.BATTLE_ROYALE, label: 'ROYALE' }
-  ];
+      if (!navyKey || navyKey.length < 10) {
+          setNavyStats(null);
+          return;
+      }
 
-  const aiLevels = [
-    { id: 'economy' as AIModelLevel, label: 'LITE', desc: 'Fast / Low Cost' },
-    { id: 'balanced' as AIModelLevel, label: 'CORE', desc: 'Balanced Logic' },
-    { id: 'premium' as AIModelLevel, label: 'PRO', desc: 'Max Intelligence' },
-  ];
+      const timer = setTimeout(async () => {
+           try {
+               const stats = await SocketService.validateNavyApiKey(navyKey);
+               if (!isCancelled) {
+                   setNavyStats(stats);
+               }
+           } catch (error) {
+               if (!isCancelled) {
+                   setNavyStats(null);
+                   console.error("Failed to validate Navy key:", error);
+               }
+           }
+      }, 800);
+
+      return () => {
+          isCancelled = true;
+          clearTimeout(timer);
+      };
+  }, [navyKey]);
+
+  const voiceCount = navyStats ? Math.floor(navyStats.usage.tokens_remaining_today / 55000) : 0;
+  const imageCount = navyStats ? Math.floor(navyStats.usage.tokens_remaining_today / 7500) : 0;
 
   // Helper for voice options
   const isVoiceScenario = gameState.settings.voiceoverScenario;
   const isVoiceResults = gameState.settings.voiceoverResults;
 
-  const toggleVoice = (opt: 'SCENARIO' | 'RESULTS') => {
-      if (opt === 'SCENARIO') onUpdateSettings('voiceoverScenario', !isVoiceScenario);
-      if (opt === 'RESULTS') onUpdateSettings('voiceoverResults', !isVoiceResults);
+  const toggleVoice = (id: 'SCENARIO' | 'RESULTS') => {
+      if (id === 'SCENARIO') onUpdateSettings('voiceoverScenario', !isVoiceScenario);
+      if (id === 'RESULTS') onUpdateSettings('voiceoverResults', !isVoiceResults);
   };
 
-  const activeGenreLabel = genres.find(g => g.id === gameState.settings.scenarioType)?.label || 'Unknown';
+  const activeGenreKey = GENRES.find(g => g.id === gameState.settings.scenarioType)?.label || 'any';
+  const activeGenreLabel = t(activeGenreKey, interfaceLang);
 
   // Close dropdown when clicking outside
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -99,10 +153,15 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   };
 
   const handleShare = () => {
-      const link = `https://t.me/AgainstAI_Bot/app?startapp=${gameState.lobbyCode}`;
-      navigator.clipboard.writeText(link);
-      // Ideally show toast
-      alert('Link copied to clipboard');
+      const shareUrl = `https://t.me/AgainstAI_Bot?startapp=${gameState.lobbyCode}`;
+      const shareText = t('shareLobbyText', interfaceLang) + ' ' + gameState.lobbyCode;
+      const fullUrl = `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareText)}`;
+
+      if (window.Telegram?.WebApp?.openTelegramLink) {
+          window.Telegram.WebApp.openTelegramLink(fullUrl);
+      } else {
+          window.open(fullUrl, '_blank', 'noopener,noreferrer');
+      }
   };
 
   const canEdit = user?.isCaptain;
@@ -126,7 +185,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             <Settings size={16} />
           </button>
           <div className="flex items-center gap-2">
-            <span className="text-tg-hint hidden sm:inline">LINK_ID:</span>
+            <span className="text-tg-hint hidden sm:inline">{t('linkId', interfaceLang)}:</span>
             <button
                 className="text-game-accent bg-game-accent/10 px-3 py-1.5 rounded-sm border border-game-accent/30 tracking-wider select-all cursor-pointer hover:bg-game-accent/20 transition-colors"
                 onClick={handleShare}
@@ -135,7 +194,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                         handleShare();
                     }
                 }}
-                aria-label="Copy lobby code"
+                aria-label={t('copyLink', interfaceLang)}
                 tabIndex={0}
             >
                 {gameState.lobbyCode}
@@ -151,27 +210,19 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         <section className="lg:col-span-7 xl:col-span-8 animate-slide-up" style={{ animationDelay: '0.1s' }}>
           <div className="flex items-center gap-2 mb-4">
             <Cpu size={14} className="text-game-accent" />
-            <h2 className="text-xs font-mono text-game-accent tracking-widest">MISSION DIRECTIVES</h2>
+            <h2 className="text-xs font-mono text-game-accent tracking-widest">{t('missionDirectives', interfaceLang)}</h2>
           </div>
 
-          <div className="bg-game-panel border border-game-accent/30 p-5 md:p-6 space-y-6 relative rounded-sm shadow-lg">
+          <div className="bg-game-panel border border-game-accent/30 p-5 md:p-6 space-y-6 relative rounded-sm shadow-lg overflow-hidden">
             <AlertTriangle size={160} className="absolute -right-10 -bottom-10 text-game-accent/5 pointer-events-none" />
 
-            {/* Captain Only Overlay for Non-Captains */}
-            {!canEdit && (
-                <div className="absolute inset-0 z-40 bg-black/50 backdrop-blur-[1px] flex items-center justify-center rounded-sm">
-                    <div className="bg-black/80 border border-game-accent/50 p-4 rounded text-center">
-                        <Crown size={24} className="mx-auto mb-2 text-yellow-500" />
-                        <p className="text-xs font-mono text-tg-hint uppercase">Awaiting Captain Configuration...</p>
-                    </div>
-                </div>
-            )}
+            {/* Removed Captain Only Overlay */}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Environment (Genre) - Dropdown */}
               <div className="relative" ref={dropdownRef}>
                 <div className="text-[10px] font-mono text-tg-hint mb-2 flex items-center gap-1.5">
-                  <Globe size={12} /> ENVIRONMENT
+                  <Globe size={12} /> {t('environment', interfaceLang)}
                 </div>
                 <button
                   onClick={() => canEdit && setIsGenreDropdownOpen(!isGenreDropdownOpen)}
@@ -191,7 +242,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                       transition={{ duration: 0.15 }}
                       className="absolute top-full left-0 right-0 mt-1 bg-game-panel border border-game-accent/40 shadow-xl z-50 max-h-60 overflow-y-auto rounded-sm"
                     >
-                      {genres.map(g => (
+                      {GENRES.map(g => (
                         <button
                           key={g.id}
                           onClick={() => {
@@ -204,7 +255,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                               : 'text-tg-hint hover:bg-black/40 hover:text-tg-text border-l-2 border-transparent'
                           }`}
                         >
-                          {g.label}
+                          {t(g.label, interfaceLang)}
                         </button>
                       ))}
                     </motion.div>
@@ -215,10 +266,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               {/* Protocol (Mode) */}
               <div>
                 <div className="text-[10px] font-mono text-tg-hint mb-2 flex items-center gap-1.5">
-                  <Crosshair size={12} /> PROTOCOL
+                  <Crosshair size={12} /> {t('protocol', interfaceLang)}
                 </div>
                 <div className="grid grid-cols-3 gap-1 bg-black/20 p-1 border border-game-accent/20 rounded-sm h-[42px]">
-                  {modes.map(m => {
+                  {MODES.map(m => {
                     const isActive = gameState.settings.mode === m.id;
                     return (
                       <button
@@ -237,7 +288,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                             transition={{ type: "spring", stiffness: 500, damping: 30 }}
                           />
                         )}
-                        <span className="relative z-10">{m.label}</span>
+                        <span className="relative z-10">{t(m.label, interfaceLang)}</span>
                       </button>
                     );
                   })}
@@ -248,10 +299,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             {/* AI Core */}
             <div>
               <div className="text-[10px] font-mono text-tg-hint mb-2 flex items-center gap-1.5">
-                <Cpu size={12} /> AI CORE INTEL
+                <Cpu size={12} /> {t('aiCoreIntel', interfaceLang)}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {aiLevels.map(level => {
+                {AI_LEVELS.map(level => {
                   const isActive = gameState.settings.aiModelLevel === level.id;
                   return (
                     <button
@@ -272,9 +323,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                       )}
                       <div className="relative z-10">
                         <div className={`text-xs font-mono font-bold mb-1 ${isActive ? 'text-game-accent' : 'text-white'}`}>
-                          {level.label}
+                          {t(level.label, interfaceLang)}
                         </div>
-                        <div className="text-[9px] text-tg-hint leading-tight">{level.desc}</div>
+                        <div className="text-[9px] text-tg-hint leading-tight">{t(level.desc, interfaceLang)}</div>
                       </div>
                     </button>
                   );
@@ -286,18 +337,15 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t border-game-accent/20">
               <div>
                 <div className="text-[10px] font-mono text-tg-hint mb-2 flex items-center gap-1.5">
-                  <Volume2 size={12} /> AUDIO
+                  <Volume2 size={12} /> {t('audio', interfaceLang)}
                 </div>
                 <div className="space-y-2">
-                  {[
-                      { id: 'SCENARIO', label: 'SCENARIO', active: isVoiceScenario },
-                      { id: 'RESULTS', label: 'RESULTS', active: isVoiceResults }
-                  ].map(opt => {
-                    const isActive = opt.active;
+                  {VOICE_OPTIONS.map(opt => {
+                    const isActive = opt.id === 'SCENARIO' ? isVoiceScenario : isVoiceResults;
                     return (
                       <button
                         key={opt.id}
-                        onClick={() => canEdit && toggleVoice(opt.id as any)}
+                        onClick={() => canEdit && toggleVoice(opt.id)}
                         disabled={!canEdit}
                         className={`relative w-full text-left px-3 py-2.5 text-[10px] md:text-xs font-mono border rounded-sm transition-colors flex justify-between items-center overflow-hidden ${
                           isActive ? 'border-game-accent text-tg-buttonText' : 'border-game-accent/20 bg-black/30 text-tg-hint hover:border-game-accent/40'
@@ -311,7 +359,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                             transition={{ type: "spring", stiffness: 500, damping: 30 }}
                           />
                         )}
-                        <span className="relative z-10">{opt.label}</span>
+                        <span className="relative z-10">{t(opt.label, interfaceLang)}</span>
                         <div className={`relative z-10 w-2 h-2 rounded-full ${isActive ? 'bg-tg-buttonText' : 'bg-transparent border border-tg-hint'}`} />
                       </button>
                     );
@@ -321,15 +369,12 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 
               <div>
                 <div className="text-[10px] font-mono text-tg-hint mb-2 flex items-center gap-1.5">
-                  <Eye size={12} /> VISUALS
+                  <Eye size={12} /> {t('visuals', interfaceLang)}
                 </div>
                 <div className="grid grid-cols-1 gap-2">
-                  {[
-                    { id: ImageGenerationMode.NONE, label: 'OFF' },
-                    { id: ImageGenerationMode.SCENARIO, label: 'SCENARIO ONLY' },
-                    { id: ImageGenerationMode.FULL, label: 'FULL RENDER' }
-                  ].map(opt => {
+                  {IMAGE_OPTIONS.map(opt => {
                     const isActive = gameState.settings.imageGenerationMode === opt.id;
+                    const label = t(opt.label, interfaceLang);
                     return (
                       <button
                         key={opt.id}
@@ -347,7 +392,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                             transition={{ type: "spring", stiffness: 500, damping: 30 }}
                           />
                         )}
-                        <span className="relative z-10">{isActive ? `[ ${opt.label} ]` : opt.label}</span>
+                        <span className="relative z-10">{isActive ? `[ ${label} ]` : label}</span>
                       </button>
                     );
                   })}
@@ -357,7 +402,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 
             {/* Language Toggle */}
             <div className="pt-4 border-t border-game-accent/20 flex justify-between items-center">
-               <div className="text-[10px] font-mono text-tg-hint">STORY LANGUAGE OVERRIDE</div>
+               <div className="text-[10px] font-mono text-tg-hint">{t('storyLanguageOverride', interfaceLang)}</div>
                <div className="flex bg-black/50 border border-game-accent/30 rounded-sm p-0.5">
                  {['ru', 'en'].map(lang => (
                    <button
@@ -383,10 +428,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xs font-mono text-game-accent tracking-widest flex items-center gap-2">
               <Users size={14} />
-              ACTIVE SQUAD
+              {t('activeSquad', interfaceLang)}
             </h2>
             <span className="text-[10px] font-mono text-tg-hint bg-black/40 px-2 py-1 rounded-sm border border-white/5">
-              {gameState.players.length} CONNECTED
+              {gameState.players.length} {t('connected', interfaceLang)}
             </span>
           </div>
 
@@ -421,7 +466,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                       {player.id === user?.id && <span className="text-[10px] text-tg-hint">(You)</span>}
                     </div>
                     <div className={`text-[10px] font-mono mt-0.5 ${player.keyCount > 0 ? 'text-game-accent' : 'text-tg-hint'}`}>
-                      STATUS: {player.keyCount > 0 ? 'READY' : 'NO KEYS'} {!player.isOnline && '[OFFLINE]'}
+                      {t('status', interfaceLang)}: {player.keyCount > 0 ? t('ready', interfaceLang) : t('noKeys', interfaceLang)} {!player.isOnline && `[${t('offline', interfaceLang)}]`}
                     </div>
                   </div>
                 </div>
@@ -434,16 +479,19 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               </motion.div>
             ))}
 
-            {/* Waiting Indicator */}
-            <motion.div
+            {/* Waiting Indicator - Now Clickable Share Button */}
+            <motion.button
+              type="button"
               layout
-              className="p-4 flex flex-col items-center justify-center gap-3 text-game-accent/50 border border-dashed border-game-accent/20 bg-black/20 rounded-sm mt-4"
+              onClick={handleShare}
+              aria-label={t('shareLobbyText', interfaceLang)}
+              className="w-full p-4 flex flex-col items-center justify-center gap-3 text-game-accent/50 border border-dashed border-game-accent/20 bg-black/20 rounded-sm mt-4 cursor-pointer hover:bg-black/30 transition-colors focus:outline-none focus:ring-1 focus:ring-game-accent/50"
             >
               <Fingerprint size={20} className="animate-pulse-fast" />
               <div className="text-[10px] font-mono text-center tracking-wide">
-                AWAITING OPERATIVES...
+                {t('awaitingOperatives', interfaceLang)}
               </div>
-            </motion.div>
+            </motion.button>
           </div>
         </section>
       </main>
@@ -455,26 +503,20 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               <motion.button
                 whileTap={{ scale: 0.98 }}
                 onClick={onStartGame}
-                disabled={gameState.players.length < 2} // Restored minimum player count < 2
+                disabled={gameState.players.length < 2}
                 className="w-full lg:w-auto lg:px-12 py-4 md:py-5 bg-game-accent text-tg-buttonText font-mono font-bold text-sm md:text-base border border-game-accent hover:opacity-90 transition-opacity flex items-center justify-center gap-2 uppercase tracking-widest tactical-border shadow-[0_0_20px_rgba(46,160,94,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Play fill="currentColor" size={18} />
-                Initiate Protocol
+                {t('initiateProtocol', interfaceLang)}
               </motion.button>
           )}
           {!canEdit && (
               <div className="w-full lg:w-auto lg:px-12 py-4 md:py-5 bg-black/50 text-tg-hint font-mono text-sm border border-game-accent/20 flex items-center justify-center">
-                  WAITING FOR CAPTAIN...
+                  {t('waitingForCaptain', interfaceLang)}
               </div>
           )}
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            onClick={handleShare}
-            aria-label="Share Link"
-            className="w-14 md:w-16 flex items-center justify-center bg-game-panel border border-game-accent/30 text-game-accent hover:bg-game-accent/10 transition-colors rounded-sm"
-          >
-            <Share2 size={20} />
-          </motion.button>
+
+          {/* Removed dedicated Share Button - logic moved to "Awaiting Operatives" container */}
         </div>
       </footer>
 
@@ -497,7 +539,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             >
               <div className="p-6 space-y-6">
                 <div className="flex items-center justify-between border-b border-game-accent/20 pb-4">
-                  <h2 className="text-lg font-mono font-bold text-white tracking-widest">SETTINGS</h2>
+                  <h2 className="text-lg font-mono font-bold text-white tracking-widest">{t('settingsHeader', interfaceLang)}</h2>
                   <button onClick={() => setIsSettingsOpen(false)} className="text-tg-hint hover:text-white transition-colors" aria-label="Close Settings">
                     <X size={20} />
                   </button>
@@ -506,7 +548,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                 <div className="space-y-4">
                   {/* Interface Language Toggle */}
                   <div className="flex items-center justify-between bg-black/40 border border-game-accent/30 rounded-sm p-2">
-                    <label className="text-[10px] font-mono text-tg-hint uppercase tracking-wider ml-2">INTERFACE LANG</label>
+                    <label className="text-[10px] font-mono text-tg-hint uppercase tracking-wider ml-2">{t('interfaceLang', interfaceLang)}</label>
                     <div className="flex bg-black/50 border border-game-accent/30 rounded-sm p-0.5">
                       {['ru', 'en'].map(lang => (
                         <button
@@ -525,7 +567,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-mono text-tg-hint mb-2 uppercase tracking-wider">CALLSIGN (NICKNAME)</label>
+                    <label className="block text-[10px] font-mono text-tg-hint mb-2 uppercase tracking-wider">{t('callsign', interfaceLang)}</label>
                     <input
                       type="text"
                       value={nickname}
@@ -535,25 +577,50 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-mono text-tg-hint mb-2 uppercase tracking-wider">GEMINI API KEY (REQUIRED)</label>
+                    <label className="block text-[10px] font-mono text-tg-hint mb-2 uppercase tracking-wider">{t('api_gemini_key_required', interfaceLang)}</label>
                     <input
                       type="password"
                       value={geminiKey}
                       onChange={(e) => setGeminiKey(e.target.value)}
                       className="w-full bg-black/40 border border-game-accent/30 rounded-sm px-4 py-3 text-sm text-white font-mono focus:outline-none focus:border-game-accent transition-colors"
                     />
-                    <p className="text-[9px] text-tg-hint mt-1.5 font-mono">Get free key at <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-game-accent hover:underline">aistudio.google.com</a>.</p>
+                    <p className="text-[9px] text-tg-hint mt-1.5 font-mono">{t('apiKeyHintPrefix', interfaceLang)} <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-game-accent hover:underline">{t('apiKeyLink', interfaceLang)}</a>.</p>
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-mono text-tg-hint mb-2 uppercase tracking-wider">API.NAVY KEY (OPTIONAL)</label>
+                    <label className="block text-[10px] font-mono text-tg-hint mb-2 uppercase tracking-wider">{t('api_api_navy_key_optional', interfaceLang)}</label>
                     <input
                       type="password"
                       value={navyKey}
                       onChange={(e) => setNavyKey(e.target.value)}
                       className="w-full bg-black/40 border border-game-accent/30 rounded-sm px-4 py-3 text-sm text-white font-mono focus:outline-none focus:border-game-accent transition-colors"
                     />
-                    <p className="text-[9px] text-tg-hint mt-1.5 font-mono">Get key at: <a href="https://api.navy" target="_blank" rel="noopener noreferrer" className="text-game-accent hover:underline">api.navy</a>.</p>
+                    <p className="text-[9px] text-tg-hint mt-1.5 font-mono">{t('api_get_free_key_at', interfaceLang)} <a href="https://api.navy" target="_blank" rel="noopener noreferrer" className="text-game-accent hover:underline">api.navy</a>.</p>
+
+                    {/* Navy Stats Display */}
+                    {navyStats && (
+                     <div className="bg-black/20 p-2 rounded-sm text-[10px] space-y-1 border border-tg-hint/10 mt-2 font-mono">
+                         <div className="flex justify-between">
+                             <span className="text-tg-hint">{t('statsPlan', interfaceLang)}</span>
+                             <span className="font-bold text-white">{navyStats.plan}</span>
+                         </div>
+                         <div className="flex justify-between">
+                             <span className="text-tg-hint">{t('statsTokens', interfaceLang)}</span>
+                             <span className={`font-bold ${navyStats.usage.tokens_remaining_today < 10000 ? 'text-red-400' : 'text-green-400'}`}>
+                                 {(navyStats.usage.tokens_remaining_today / 1000).toFixed(1)}k
+                             </span>
+                         </div>
+                         <div className="border-t border-tg-hint/10 my-1"></div>
+                         <div className="flex justify-between">
+                             <span className="text-tg-hint">{t('statsEstVoices', interfaceLang)}</span>
+                             <span className="font-bold text-white">{voiceCount}</span>
+                         </div>
+                         <div className="flex justify-between">
+                             <span className="text-tg-hint">{t('statsEstImages', interfaceLang)}</span>
+                             <span className="font-bold text-white">{imageCount}</span>
+                         </div>
+                     </div>
+                    )}
                   </div>
                 </div>
 
@@ -562,13 +629,13 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                     onClick={() => setIsSettingsOpen(false)}
                     className="flex-1 py-3 bg-black/40 border border-game-accent/30 text-tg-hint font-mono text-xs hover:text-white hover:border-game-accent/60 transition-colors rounded-sm"
                   >
-                    CANCEL
+                    {t('cancel', interfaceLang).toUpperCase()}
                   </button>
                   <button
                     onClick={handleSave}
                     className="flex-1 py-3 bg-game-accent text-tg-buttonText font-mono font-bold text-xs border border-game-accent hover:opacity-90 transition-opacity rounded-sm shadow-[0_0_10px_rgba(46,160,94,0.2)]"
                   >
-                    SAVE DATA
+                    {t('saveData', interfaceLang)}
                   </button>
                 </div>
               </div>
