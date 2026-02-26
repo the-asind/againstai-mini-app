@@ -214,7 +214,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           </div>
 
           <div className="bg-game-panel border border-game-accent/30 p-5 md:p-6 space-y-6 relative rounded-sm shadow-lg overflow-hidden">
-            <AlertTriangle size={160} className="absolute -right-10 -bottom-10 text-game-accent/5 pointer-events-none" />
+            <AlertTriangle size={160} className="absolute -right-10 -bottom-10 text-white/5 pointer-events-none" />
 
             {/* Removed Captain Only Overlay */}
 

@@ -528,7 +528,7 @@ const App: React.FC = () => {
   };
 
   const handleShare = () => {
-      const link = `https://t.me/AgainstAI_Bot/app?startapp=${gameState.lobbyCode}`;
+      const link = `https://t.me/AgainstAIBot?startapp=${gameState.lobbyCode}`;
       navigator.clipboard.writeText(link);
       setToast({ msg: t('linkCopied', lang), type: 'success' });
   };
