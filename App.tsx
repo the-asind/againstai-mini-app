@@ -219,6 +219,7 @@ const App: React.FC = () => {
 
   // -- Effects --
 
+  // 1. Initial Setup Effect (Run Once)
   useEffect(() => {
     const initApp = async () => {
         // Init Telegram WebApp
@@ -290,14 +291,6 @@ const App: React.FC = () => {
         setToast({ msg: err.message, type: 'error' });
     });
 
-    // Monitor connection status
-    const checkConnection = setInterval(() => {
-        const connected = SocketService.isConnected();
-        if (connected !== isSocketConnected) {
-            setIsSocketConnected(connected);
-        }
-    }, 1000);
-
     // Initialize and Connect
     initApp().then(() => {
         SocketService.connect();
@@ -306,9 +299,22 @@ const App: React.FC = () => {
     return () => {
         unsubState();
         unsubError();
+    };
+  }, []);
+
+  // 2. Connection Monitor Effect (Separate to avoid re-initializing app)
+  useEffect(() => {
+    const checkConnection = setInterval(() => {
+        const connected = SocketService.isConnected();
+        if (connected !== isSocketConnected) {
+            setIsSocketConnected(connected);
+        }
+    }, 1000);
+
+    return () => {
         clearInterval(checkConnection);
     };
-  }, [isSocketConnected]); // Add dep to ensure effect updates if something external changes (unlikely for interval)
+  }, [isSocketConnected]);
 
   // Auto-Join Effect
   useEffect(() => {

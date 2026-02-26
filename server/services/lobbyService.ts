@@ -246,11 +246,15 @@ export class LobbyService {
       const lobby = this.lobbies.get(code);
       if (!lobby) return;
 
-      // Reuse collectKeys mechanism to get all current keys
-      // But we need a separate collector or flag?
-      // Since collectKeys is designed for game start (locking state etc),
-      // we should duplicate the logic slightly to avoid side effects or state changes.
+      // Prevent race condition: if keys are already being collected (e.g. game start), abort stats check.
+      if (this.keyCollectors.has(code)) {
+          console.warn(`[LobbyService] Stats check aborted for lobby ${code} - collection already in progress.`);
+          const socketId = this.playerSockets.get(playerId)?.values().next().value;
+          if (socketId) this.io.to(socketId).emit('navy_aggregate_stats', { totalTokens: 0, contributors: 0 }); // Or emit error? For now, return 0/0 is safer than breaking UI.
+          return;
+      }
 
+      // Reuse collectKeys mechanism to get all current keys
       this.keyCollectors.set(code, new Map());
 
       // Request keys from all online players
@@ -271,6 +275,15 @@ export class LobbyService {
                   clearInterval(interval);
                   return;
               }
+              // Race check: if map was deleted (e.g. by another concurrent process finishing?), stop.
+              if (!this.keyCollectors.has(code)) {
+                  resolved = true;
+                  clearTimeout(timeout);
+                  clearInterval(interval);
+                  resolve();
+                  return;
+              }
+
               if (this.keyCollectors.get(code)!.size >= onlinePlayers) {
                   resolved = true;
                   clearTimeout(timeout);
