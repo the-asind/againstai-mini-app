@@ -45,7 +45,7 @@ export interface Player {
   actionText?: string;
   isOnline: boolean;
   keyCount: 0 | 1 | 2; // Stricter type: 0, 1, or 2
-  navyUsage?: { tokens: number };
+  navyUsage?: { tokens: number; plan?: string };
 }
 
 export enum AIModelLevel {
