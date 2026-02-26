@@ -1,0 +1,29 @@
+/* Custom Styles for Against AI */
+
+/* Hide scrollbar for horizontal scrolling */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Tactical UI Utilities */
+.tactical-border {
+  position: relative;
+}
+.tactical-border::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; width: 8px; height: 8px;
+  border-top: 2px solid var(--tg-theme-button-color, #007aff);
+  border-left: 2px solid var(--tg-theme-button-color, #007aff);
+}
+.tactical-border::after {
+  content: '';
+  position: absolute;
+  bottom: 0; right: 0; width: 8px; height: 8px;
+  border-bottom: 2px solid var(--tg-theme-button-color, #007aff);
+  border-right: 2px solid var(--tg-theme-button-color, #007aff);
+}

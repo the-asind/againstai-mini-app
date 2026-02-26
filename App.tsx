@@ -8,6 +8,7 @@ import { Input } from './components/Input';
 import { CodeInput } from './components/CodeInput';
 import { MarkdownDisplay } from './components/MarkdownDisplay';
 import { Toast } from './components/Toast';
+import { LobbyView } from './components/LobbyView';
 
 // Helper to count keys
 const getKeyCount = (): 0 | 1 | 2 => {
@@ -358,6 +359,62 @@ const App: React.FC = () => {
       }
   };
 
+  // Handler for LobbyView's internal settings modal
+  const handleSaveSettingsFromLobby = (
+    newNick: string,
+    newApiKey: string,
+    newNavyKey: string,
+    newLang: 'en' | 'ru'
+  ) => {
+      setLang(newLang);
+
+      if (!newNick.trim()) {
+          setToast({ msg: t('nicknameRequired', newLang), type: 'error' });
+          return;
+      }
+
+      setSettingsNick(newNick);
+      localStorage.setItem(STORAGE_KEYS.NICKNAME, newNick);
+
+      if (newApiKey.trim()) {
+          setSettingsApiKey(newApiKey);
+          localStorage.setItem(STORAGE_KEYS.API_KEY, newApiKey);
+      } else {
+          setSettingsApiKey('');
+          localStorage.removeItem(STORAGE_KEYS.API_KEY);
+      }
+
+      if (newNavyKey.trim()) {
+          setSettingsNavyApiKey(newNavyKey);
+          localStorage.setItem(STORAGE_KEYS.NAVY_KEY, newNavyKey);
+          SocketService.validateNavyApiKey(newNavyKey);
+      } else {
+          setSettingsNavyApiKey('');
+          localStorage.removeItem(STORAGE_KEYS.NAVY_KEY);
+      }
+
+      const userObj = window.Telegram?.WebApp?.initDataUnsafe?.user;
+      const updatedUser: Player = {
+          id: userObj?.id?.toString() || (user?.id || Math.random().toString(36).substr(2, 9)),
+          name: newNick,
+          isCaptain: user?.isCaptain || false,
+          status: user?.status || 'waiting',
+          isOnline: true,
+          keyCount: getKeyCount(),
+          avatarUrl: userObj?.username ? `https://t.me/i/userpic/320/${userObj.username}.jpg` : undefined
+      };
+
+      setUser(updatedUser);
+
+      if (gameState.lobbyCode) {
+          SocketService.updatePlayer(gameState.lobbyCode, {
+              name: newNick,
+              keyCount: getKeyCount()
+          });
+      }
+      setToast({ msg: "Settings Saved", type: 'success' });
+  };
+
   const handleCreateLobby = async () => {
       if (!user) {
           setShowSettingsModal(true);
@@ -546,266 +603,20 @@ const App: React.FC = () => {
 
   if (gameState.status === GameStatus.LOBBY_WAITING || gameState.status === GameStatus.LOBBY_SETUP || gameState.status === GameStatus.LOBBY_STARTING) {
       return (
-          <div className="min-h-screen flex flex-col p-4 animate-fade-in relative">
-               {/* Header */}
-               <div className="flex justify-between items-center mb-6">
-                   <div className="flex flex-col">
-                       <span className="text-xs text-tg-hint uppercase">{t('codeLabel', lang)}</span>
-                       <span className="text-3xl font-mono font-bold tracking-widest text-tg-button select-all cursor-pointer" onClick={() => {
-                           navigator.clipboard.writeText(gameState.lobbyCode || '');
-                           setToast({ msg: t('linkCopied', lang), type: 'success' });
-                       }}>
-                           {gameState.lobbyCode}
-                       </span>
-                   </div>
-                   <button onClick={() => setShowSettingsModal(true)} className="p-2 bg-tg-secondaryBg rounded-full">
-                       ⚙️
-                   </button>
-               </div>
-
-               {/* Settings Panel (Captain Only) */}
-               {user?.isCaptain ? (
-                  <div className="bg-tg-secondaryBg p-4 rounded-xl mb-6 space-y-4 shadow-lg border border-tg-hint/10">
-                      <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">{t('gameSettings', lang)}</h3>
-
-                      {/* Mode & Scenario */}
-                      <div className="grid grid-cols-2 gap-3">
-                          <div>
-                              <label className="text-[10px] text-tg-hint uppercase font-bold">{t('gameMode', lang)}</label>
-                              <select
-                                className="w-full bg-tg-bg p-2 rounded text-sm mt-1 border border-tg-hint/20 focus:border-tg-button outline-none"
-                                value={gameState.settings.mode}
-                                onChange={(e) => handleUpdateSettings('mode', e.target.value)}
-                              >
-                                  <option value={GameMode.COOP}>{t('coop', lang)}</option>
-                                  <option value={GameMode.PVP}>{t('pvp', lang)}</option>
-                                  <option value={GameMode.BATTLE_ROYALE}>{t('battleRoyale', lang)}</option>
-                              </select>
-                          </div>
-                          <div>
-                              <label className="text-[10px] text-tg-hint uppercase font-bold">{t('scenarioType', lang)}</label>
-                              <select
-                                className="w-full bg-tg-bg p-2 rounded text-sm mt-1 border border-tg-hint/20 focus:border-tg-button outline-none"
-                                value={gameState.settings.scenarioType}
-                                onChange={(e) => handleUpdateSettings('scenarioType', e.target.value)}
-                              >
-                                  <option value={ScenarioType.ANY}>{t('any', lang)}</option>
-                                  <option value={ScenarioType.SCI_FI}>{t('scifi', lang)}</option>
-                                  <option value={ScenarioType.SUPERNATURAL}>{t('supernatural', lang)}</option>
-                                  <option value={ScenarioType.APOCALYPSE}>{t('apocalypse', lang)}</option>
-                                  <option value={ScenarioType.FANTASY}>{t('fantasy', lang)}</option>
-                                  <option value={ScenarioType.CYBERPUNK}>{t('cyberpunk', lang)}</option>
-                                  <option value={ScenarioType.BACKROOMS}>{t('backrooms', lang)}</option>
-                                  <option value={ScenarioType.SCP}>{t('scp', lang)}</option>
-                                  <option value={ScenarioType.MINECRAFT}>{t('minecraft', lang)}</option>
-                                  <option value={ScenarioType.HARRY_POTTER}>{t('harryPotter', lang)}</option>
-                              </select>
-                          </div>
-                      </div>
-
-                      {/* Language & AI Level */}
-                      <div className="grid grid-cols-2 gap-3">
-                          <div>
-                              <label className="text-[10px] text-tg-hint uppercase font-bold">{t('storyLanguage', lang)}</label>
-                              <select
-                                className="w-full bg-tg-bg p-2 rounded text-sm mt-1 border border-tg-hint/20 focus:border-tg-button outline-none"
-                                value={gameState.settings.storyLanguage || 'en'}
-                                onChange={(e) => handleUpdateSettings('storyLanguage', e.target.value)}
-                              >
-                                  <option value="en">English</option>
-                                  <option value="ru">Русский</option>
-                              </select>
-                          </div>
-                          <div>
-                              <label className="text-[10px] text-tg-hint uppercase font-bold">{t('aiLevel', lang)}</label>
-                              <select
-                                className="w-full bg-tg-bg p-2 rounded text-sm mt-1 border border-tg-hint/20 focus:border-tg-button outline-none"
-                                value={gameState.settings.aiModelLevel}
-                                onChange={(e) => handleUpdateSettings('aiModelLevel', e.target.value)}
-                              >
-                                  <option value={AIModelLevel.ECONOMY}>{t('economy', lang)}</option>
-                                  <option value={AIModelLevel.BALANCED}>{t('balanced', lang)}</option>
-                                  <option value={AIModelLevel.PREMIUM}>{t('premium', lang)}</option>
-                              </select>
-                          </div>
-                      </div>
-
-                      {/* Time & Chars */}
-                      <div className="grid grid-cols-2 gap-3">
-                           <div>
-                               <label className="text-[10px] text-tg-hint uppercase font-bold flex justify-between">
-                                   <span>{t('timeLimit', lang)}</span>
-                                   <span>{gameState.settings.timeLimitSeconds}s</span>
-                               </label>
-                               <input
-                                  type="range"
-                                  min={MIN_TIME} max={MAX_TIME} step={10}
-                                  value={gameState.settings.timeLimitSeconds}
-                                  onChange={(e) => handleUpdateSettings('timeLimitSeconds', parseInt(e.target.value))}
-                                  className="w-full h-2 bg-tg-bg rounded-lg appearance-none cursor-pointer mt-2"
-                               />
-                           </div>
-                           <div>
-                               <label className="text-[10px] text-tg-hint uppercase font-bold flex justify-between">
-                                   <span>{t('charLimit', lang)}</span>
-                                   <span>{gameState.settings.charLimit}</span>
-                               </label>
-                               <input
-                                  type="range"
-                                  min={MIN_CHARS} max={MAX_CHARS} step={100}
-                                  value={gameState.settings.charLimit}
-                                  onChange={(e) => handleUpdateSettings('charLimit', parseInt(e.target.value))}
-                                  className="w-full h-2 bg-tg-bg rounded-lg appearance-none cursor-pointer mt-2"
-                               />
-                           </div>
-                      </div>
-
-                      {/* Voiceover Settings (Moved here as sibling) */}
-                      <div>
-                          <div className="flex justify-between text-sm mb-2">
-                              <span>{t('voiceoverScenario', lang) && "Voiceover (API.NAVY)"}</span>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 mb-4">
-                               {/* Scenario Voiceover */}
-                               <button
-                                  onClick={() => handleUpdateSettings('voiceoverScenario', !gameState.settings.voiceoverScenario)}
-                                  className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
-                                      ${gameState.settings.voiceoverScenario
-                                          ? 'bg-tg-button text-white border-transparent'
-                                          : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
-                                      }
-                                  `}
-                               >
-                                   <span>{t('voiceoverScenario', lang)}</span>
-                                   {gameState.settings.voiceoverScenario && <span className="text-[8px] text-yellow-300 font-bold">{t('expensive', lang)}</span>}
-                               </button>
-
-                               {/* Results Voiceover */}
-                               <button
-                                  onClick={() => handleUpdateSettings('voiceoverResults', !gameState.settings.voiceoverResults)}
-                                  className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
-                                      ${gameState.settings.voiceoverResults
-                                          ? 'bg-tg-button text-white border-transparent'
-                                          : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
-                                      }
-                                  `}
-                               >
-                                   <span>{t('voiceoverResults', lang)}</span>
-                                   {gameState.settings.voiceoverResults && <span className="text-[8px] text-yellow-300 font-bold">{t('expensive', lang)}</span>}
-                               </button>
-                          </div>
-                      </div>
-
-                      {/* Image Generation Mode */}
-                      <div>
-                          <div className="flex justify-between text-sm mb-2">
-                              <span>{t('imageGenerationMode', lang)}</span>
-                          </div>
-                          <div className="grid grid-cols-3 gap-2">
-                              {(['none', 'scenario', 'full'] as ImageGenerationMode[]).map((mode) => (
-                                 <button
-                                    key={mode}
-                                    onClick={() => handleUpdateSettings('imageGenerationMode', mode)}
-                                    className={`py-2 px-1 text-[10px] font-bold uppercase rounded-lg border transition-all flex flex-col items-center justify-center text-center gap-1
-                                        ${gameState.settings.imageGenerationMode === mode
-                                            ? 'bg-tg-button text-white border-transparent'
-                                            : 'bg-tg-bg text-tg-hint border-tg-hint/10 hover:bg-tg-bg/80'
-                                        }
-                                    `}
-                                 >
-                                     <span>
-                                         {mode === 'none' && t('imgNone', lang)}
-                                         {mode === 'scenario' && t('imgScenario', lang)}
-                                         {mode === 'full' && t('imgFull', lang)}
-                                     </span>
-                                     <span className="text-[8px] opacity-70 normal-case leading-tight max-w-full overflow-hidden text-ellipsis">
-                                         {mode === 'none' && t('imgNoneDesc', lang)}
-                                         {mode === 'scenario' && t('imgScenarioDesc', lang)}
-                                         {mode === 'full' && t('imgFullDesc', lang)}
-                                     </span>
-                                 </button>
-                              ))}
-                          </div>
-                      </div>
-                  </div>
-               ) : (
-                  // Read-Only Settings for Non-Captains
-                  <div className="bg-tg-secondaryBg p-4 rounded-xl mb-6 text-center shadow border border-tg-hint/10">
-                      <p className="text-sm text-tg-hint">{t('lobbySetup', lang)}</p>
-                      <div className="flex justify-center gap-4 mt-2">
-                          <span className="px-2 py-1 bg-tg-bg rounded text-xs border border-tg-hint/20">
-                              {gameState.settings.mode === GameMode.COOP && t('coop', lang)}
-                              {gameState.settings.mode === GameMode.PVP && t('pvp', lang)}
-                              {gameState.settings.mode === GameMode.BATTLE_ROYALE && t('battleRoyale', lang)}
-                          </span>
-                          <span className="px-2 py-1 bg-tg-bg rounded text-xs border border-tg-hint/20">{gameState.settings.timeLimitSeconds}s</span>
-                      </div>
-                  </div>
-               )}
-
-              <h3 className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-2">{t('players', lang)}</h3>
-              <div className="grid grid-cols-1 gap-2">
-                  {gameState.players.map((p) => (
-                      <div key={p.id} className={`flex items-center p-3 rounded-lg bg-tg-secondaryBg border ${p.id === user?.id ? 'border-tg-button' : 'border-transparent'} ${!p.isOnline ? 'opacity-50' : ''}`}>
-                          {p.avatarUrl ? (
-                              <img src={p.avatarUrl} className="w-8 h-8 rounded-full mr-3" />
-                          ) : (
-                              <div className="w-8 h-8 rounded-full bg-tg-bg flex items-center justify-center mr-3 text-xs font-bold">
-                                  {p.name.charAt(0)}
-                              </div>
-                          )}
-                          <div className="flex flex-col">
-                              <span className="text-sm font-bold">{p.name} {p.id === user?.id && '(You)'}</span>
-                              <div className="flex space-x-1">
-                                  <div className={`w-2 h-2 rounded-full ${p.keyCount > 0 ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                                  {p.keyCount === 2 && <div className="w-2 h-2 rounded-full bg-blue-500"></div>}
-                              </div>
-                          </div>
-                          {!p.isOnline && <span className="ml-2 text-xs text-red-500 font-bold">[OFFLINE]</span>}
-                          {p.isCaptain && <span className="ml-auto text-xs text-yellow-500">👑 Captain</span>}
-                      </div>
-                  ))}
-              </div>
-
-              <div className="space-y-3 mt-6">
-                 {/* Navy Warning */}
-                 {(gameState.settings.voiceoverScenario || gameState.settings.voiceoverResults) &&
-                  !gameState.players.some(p => (p.navyUsage?.tokens || 0) >= 55000) && (
-                     <div className="bg-yellow-500/20 border border-yellow-500/50 p-3 rounded-lg text-xs text-yellow-200 animate-pulse flex items-center gap-2">
-                         <span className="text-xl">⚠️</span>
-                         <span>{t("warning_low_tokens", lang) || "Voiceover enabled but no player has enough Navy tokens (need 55k+)."}</span>
-                     </div>
-                 )}
-
-                 {user?.isCaptain ? (
-                     <Button
-                        onClick={handleStartGame}
-                        disabled={gameState.players.length < 2 || !localStorage.getItem(STORAGE_KEYS.API_KEY)}
-                        className={!localStorage.getItem(STORAGE_KEYS.API_KEY) ? 'opacity-50' : ''}
-                     >
-                        {gameState.status === GameStatus.LOBBY_STARTING ? t('loading', lang) : t('startGame', lang)}
-                     </Button>
-                 ) : (
-                     <p className="text-center text-tg-hint animate-pulse">
-                         {gameState.status === GameStatus.LOBBY_STARTING ? t('game_starting', lang) : t('waitingForPlayers', lang)}
-                     </p>
-                 )}
-                 <Button variant="secondary" onClick={handleShare}>
-                     {t('shareInvite', lang)}
-                 </Button>
-              </div>
-
-              {showSettingsModal && (
-                  <SettingsModal
-                      settingsNick={settingsNick} setSettingsNick={setSettingsNick}
-                      settingsApiKey={settingsApiKey} setSettingsApiKey={setSettingsApiKey}
-                      settingsNavyApiKey={settingsNavyApiKey} setSettingsNavyApiKey={setSettingsNavyApiKey}
-                      saveSettings={handleSaveSettings} setShowSettingsModal={setShowSettingsModal}
-                      lang={lang} user={user}
-                  />
-              )}
-              {toast && <Toast message={toast.msg} type={toast.type} />}
-          </div>
+          <>
+            <LobbyView
+                gameState={gameState}
+                user={user}
+                onUpdateSettings={handleUpdateSettings}
+                onStartGame={handleStartGame}
+                onSaveSettings={handleSaveSettingsFromLobby}
+                initialNick={settingsNick}
+                initialApiKey={settingsApiKey}
+                initialNavyKey={settingsNavyApiKey}
+                initialLang={lang}
+            />
+            {toast && <Toast message={toast.msg} type={toast.type} />}
+          </>
       );
   }
 
