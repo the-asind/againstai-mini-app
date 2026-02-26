@@ -192,6 +192,7 @@ const App: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [autoJoinCode, setAutoJoinCode] = useState<string | null>(null);
 
   // Settings Modal State
   const [settingsNick, setSettingsNick] = useState('');
@@ -212,6 +213,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const initApp = async () => {
         // Init Telegram WebApp
+        let startParam = null;
         const tg = window.Telegram?.WebApp;
         if (tg) {
             tg.ready();
@@ -225,10 +227,13 @@ const App: React.FC = () => {
             document.documentElement.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#3b82f6');
             document.documentElement.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff');
             document.documentElement.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#374151'); // Fallback gray-700
+            
+            // Capture start param (invite code)
+            if (tg.initDataUnsafe?.start_param) {
+                startParam = tg.initDataUnsafe.start_param;
+                setAutoJoinCode(startParam);
+            }
         }
-
-        // Connect Socket
-        SocketService.connect();
 
         // Load saved nickname/keys for modal
         const savedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME);
@@ -256,9 +261,8 @@ const App: React.FC = () => {
         }
     };
 
-    initApp();
-
     // Socket Subscriptions
+    // We subscribe BEFORE connecting to ensure we don't miss the initial game_state event
     const unsubState = SocketService.subscribe((newState) => {
         setGameState(newState);
 
@@ -275,11 +279,27 @@ const App: React.FC = () => {
         setToast({ msg: err.message, type: 'error' });
     });
 
+    // Initialize and Connect
+    initApp().then(() => {
+        SocketService.connect();
+    });
+
     return () => {
         unsubState();
         unsubError();
     };
   }, []);
+
+  // Auto-Join Effect
+  useEffect(() => {
+      if (autoJoinCode && user && !gameState.lobbyCode && !loading) {
+          // Prevent double-join attempts
+          if (gameState.status === GameStatus.HOME) {
+              handleJoinLobby(autoJoinCode);
+              setAutoJoinCode(null); // Clear code after attempt
+          }
+      }
+  }, [autoJoinCode, user, gameState.lobbyCode, gameState.status]);
 
   // Timer Effect
   useEffect(() => {
