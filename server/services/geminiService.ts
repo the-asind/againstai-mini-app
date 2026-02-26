@@ -12,7 +12,7 @@ import { isTransientError } from "../utils/errorUtils";
 const getClient = (apiKey: string) => new GoogleGenAI({ apiKey: apiKey.trim() });
 
 // Helper to pick model based on level
-const getModelName = (level: AIModelLevel = 'balanced', type: 'FAST' | 'SMART'): string => {
+const getModelName = (level: AIModelLevel = AIModelLevel.BALANCED, type: 'FAST' | 'SMART'): string => {
     const configLevel = CONFIG.AI_LEVELS[level] || CONFIG.AI_LEVELS.balanced;
     return configLevel[type];
 };
@@ -43,7 +43,7 @@ export const GeminiService = {
 
     try {
         const ai = getClient(apiKey);
-        const modelName = getModelName('economy', 'FAST');
+        const modelName = getModelName(AIModelLevel.ECONOMY, 'FAST');
 
         const response = await retryWithBackoffSingle(() => ai.models.generateContent({
             model: modelName,
@@ -69,7 +69,7 @@ export const GeminiService = {
     type: ScenarioType,
     players: Player[],
     language: Language = 'en',
-    aiLevel: AIModelLevel = 'balanced'
+    aiLevel: AIModelLevel = AIModelLevel.BALANCED
   ): Promise<ScenarioResponse> => {
 
     return keyManager.executeWithRetry(async (apiKey) => {
@@ -160,7 +160,7 @@ export const GeminiService = {
     try {
         return await keyManager.executeWithRetry(async (apiKey) => {
             const ai = getClient(apiKey);
-            const modelName = getModelName('balanced', 'FAST');
+            const modelName = getModelName(AIModelLevel.BALANCED, 'FAST');
 
             console.log(`[Gemini Request] Model: ${modelName}, Task: CHEAT_DETECTOR`);
 
@@ -202,7 +202,7 @@ export const GeminiService = {
     players: Player[],
     mode: GameMode,
     language: Language = 'en',
-    aiLevel: AIModelLevel = 'balanced'
+    aiLevel: AIModelLevel = AIModelLevel.BALANCED
   ): Promise<RoundResult> => {
 
     // Fallback Result in case all retries fail
