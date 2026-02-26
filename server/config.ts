@@ -9,7 +9,7 @@ export const CONFIG = {
   // Default models if not specified in env
   MODELS: {
     FAST: process.env.GEMINI_MODEL_FAST || 'gemini-3-flash-preview',
-    SMART: process.env.GEMINI_MODEL_SMART || 'gemini-3-pro-preview',
+    SMART: process.env.GEMINI_MODEL_SMART || 'gemini-3.1-pro-preview',
     IMAGE: process.env.GEMINI_MODEL_IMAGE || 'gemini-2.5-flash-image'
   },
   // AI Levels
@@ -24,7 +24,7 @@ export const CONFIG = {
     },
     premium: {
         FAST: process.env.AI_LEVEL_3_FAST || 'gemini-3-flash-preview',
-        SMART: process.env.AI_LEVEL_3_SMART || 'gemini-3-pro-preview'
+        SMART: process.env.AI_LEVEL_3_SMART || 'gemini-3.1-pro-preview'
     }
   }
 };
