@@ -19,7 +19,9 @@
                 button: 'var(--tg-theme-button-color, #007aff)',
                 buttonText: 'var(--tg-theme-button-text-color, #ffffff)',
                 secondaryBg: 'var(--tg-theme-secondary-bg-color, #2c2c2e)',
-              }
+              },
+              'game-accent': 'var(--tg-theme-button-color, #007aff)',
+              'game-panel': 'var(--tg-theme-secondary-bg-color, #2c2c2e)',
             },
             keyframes: {
               fadeIn: {
@@ -61,6 +63,25 @@
       ::-webkit-scrollbar {
         width: 0px;
         background: transparent;
+      }
+
+      /* Tactical UI Utilities */
+      .tactical-border {
+        position: relative;
+      }
+      .tactical-border::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0; width: 8px; height: 8px;
+        border-top: 2px solid var(--tg-theme-button-color, #007aff);
+        border-left: 2px solid var(--tg-theme-button-color, #007aff);
+      }
+      .tactical-border::after {
+        content: '';
+        position: absolute;
+        bottom: 0; right: 0; width: 8px; height: 8px;
+        border-bottom: 2px solid var(--tg-theme-button-color, #007aff);
+        border-right: 2px solid var(--tg-theme-button-color, #007aff);
       }
     </style>
   <script type="importmap">
