@@ -97,6 +97,7 @@ export const translations = {
     voiceoverResults: "Voiceover Results",
     expensive: "Expensive!",
     warning_low_tokens: "Voiceover enabled but no player has enough Navy tokens (need 55k+).",
+    settingsSaved: "Settings Saved",
   },
   ru: {
     createLobby: "Создать лобби",
@@ -142,7 +143,7 @@ export const translations = {
     mockNote: "Безопасное подключение установлено. ИИ: Gemini 3 Pro.",
     back: "Назад",
     continue: "Продолжить",
-    lobbyNotFound: "Лобби не найдено",
+    lobbyNotFound: "Lobby not found",
     seconds: "сек",
     chars: "симв",
     settings: "Настройки лобби",
@@ -194,6 +195,7 @@ export const translations = {
     voiceoverResults: "Озвучка Результатов",
     expensive: "Дорого!",
     warning_low_tokens: "Озвучка включена, но у игроков недостаточно токенов Navy (нужно 55к+).",
+    settingsSaved: "Настройки сохранены",
   }
 };
 

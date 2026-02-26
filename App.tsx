@@ -364,13 +364,13 @@ const App: React.FC = () => {
     newNick: string,
     newApiKey: string,
     newNavyKey: string,
-    newLang: 'en' | 'ru'
-  ) => {
+    newLang: Language
+  ): boolean => {
       setLang(newLang);
 
       if (!newNick.trim()) {
           setToast({ msg: t('nicknameRequired', newLang), type: 'error' });
-          return;
+          return false;
       }
 
       setSettingsNick(newNick);
@@ -412,7 +412,8 @@ const App: React.FC = () => {
               keyCount: getKeyCount()
           });
       }
-      setToast({ msg: "Settings Saved", type: 'success' });
+      setToast({ msg: t('settingsSaved', newLang), type: 'success' });
+      return true;
   };
 
   const handleCreateLobby = async () => {

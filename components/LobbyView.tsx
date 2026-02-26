@@ -1,18 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Terminal, Users, Cpu, Fingerprint, Crosshair, Share2, Play, AlertTriangle, Eye, Volume2, Globe, Check, Crown, ChevronDown, Settings, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GameState, Player, GameMode, ScenarioType, ImageGenerationMode, LobbySettings } from '../types';
+import { GameState, Player, GameMode, ScenarioType, ImageGenerationMode, LobbySettings, Language, AIModelLevel } from '../types';
 
 interface LobbyViewProps {
     gameState: GameState;
     user: Player | null;
-    onUpdateSettings: (key: keyof LobbySettings, value: any) => void;
+    onUpdateSettings: (key: keyof LobbySettings, value: LobbySettings[keyof LobbySettings]) => void;
     onStartGame: () => void;
-    onSaveSettings: (nick: string, apiKey: string, navyKey: string, lang: 'en' | 'ru') => void;
+    onSaveSettings: (nick: string, apiKey: string, navyKey: string, lang: Language) => boolean;
     initialNick: string;
     initialApiKey: string;
     initialNavyKey: string;
-    initialLang: 'en' | 'ru';
+    initialLang: Language;
 }
 
 export const LobbyView: React.FC<LobbyViewProps> = ({
@@ -33,7 +33,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   const [nickname, setNickname] = useState(initialNick);
   const [geminiKey, setGeminiKey] = useState(initialApiKey);
   const [navyKey, setNavyKey] = useState(initialNavyKey);
-  const [interfaceLang, setInterfaceLang] = useState<'en'|'ru'>(initialLang);
+  const [interfaceLang, setInterfaceLang] = useState<Language>(initialLang);
 
   // Update local settings state when props change (if needed, e.g. external update)
   useEffect(() => {
@@ -63,9 +63,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   ];
 
   const aiLevels = [
-    { id: 'economy', label: 'LITE', desc: 'Fast / Low Cost' },
-    { id: 'balanced', label: 'CORE', desc: 'Balanced Logic' },
-    { id: 'premium', label: 'PRO', desc: 'Max Intelligence' },
+    { id: 'economy' as AIModelLevel, label: 'LITE', desc: 'Fast / Low Cost' },
+    { id: 'balanced' as AIModelLevel, label: 'CORE', desc: 'Balanced Logic' },
+    { id: 'premium' as AIModelLevel, label: 'PRO', desc: 'Max Intelligence' },
   ];
 
   // Helper for voice options
@@ -92,8 +92,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   }, []);
 
   const handleSave = () => {
-      onSaveSettings(nickname, geminiKey, navyKey, interfaceLang);
-      setIsSettingsOpen(false);
+      const success = onSaveSettings(nickname, geminiKey, navyKey, interfaceLang);
+      if (success) {
+        setIsSettingsOpen(false);
+      }
   };
 
   const handleShare = () => {
@@ -118,15 +120,26 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         <div className="flex items-center gap-3 font-mono text-xs md:text-sm">
           <button
             onClick={() => setIsSettingsOpen(true)}
+            aria-label="Open Settings"
             className="p-2 bg-game-panel border border-game-accent/30 text-tg-hint hover:text-game-accent hover:border-game-accent/60 transition-colors rounded-sm"
           >
             <Settings size={16} />
           </button>
           <div className="flex items-center gap-2">
             <span className="text-tg-hint hidden sm:inline">LINK_ID:</span>
-            <span className="text-game-accent bg-game-accent/10 px-3 py-1.5 rounded-sm border border-game-accent/30 tracking-wider select-all cursor-pointer" onClick={handleShare}>
+            <button
+                className="text-game-accent bg-game-accent/10 px-3 py-1.5 rounded-sm border border-game-accent/30 tracking-wider select-all cursor-pointer hover:bg-game-accent/20 transition-colors"
+                onClick={handleShare}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        handleShare();
+                    }
+                }}
+                aria-label="Copy lobby code"
+                tabIndex={0}
+            >
                 {gameState.lobbyCode}
-            </span>
+            </button>
           </div>
         </div>
       </header>
@@ -349,7 +362,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                  {['ru', 'en'].map(lang => (
                    <button
                      key={lang}
-                     onClick={() => canEdit && onUpdateSettings('storyLanguage', lang)}
+                     onClick={() => canEdit && onUpdateSettings('storyLanguage', lang as Language)}
                      disabled={!canEdit}
                      className={`px-4 py-1.5 text-[10px] font-mono rounded-sm transition-colors ${
                        gameState.settings.storyLanguage === lang
@@ -442,8 +455,8 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               <motion.button
                 whileTap={{ scale: 0.98 }}
                 onClick={onStartGame}
-                disabled={gameState.players.length < 1} // Should be < 2 but for testing < 1 is ok? No logic says < 2
-                className="w-full lg:w-auto lg:px-12 py-4 md:py-5 bg-game-accent text-tg-buttonText font-mono font-bold text-sm md:text-base border border-game-accent hover:opacity-90 transition-opacity flex items-center justify-center gap-2 uppercase tracking-widest tactical-border shadow-[0_0_20px_rgba(46,160,94,0.2)]"
+                disabled={gameState.players.length < 2} // Restored minimum player count < 2
+                className="w-full lg:w-auto lg:px-12 py-4 md:py-5 bg-game-accent text-tg-buttonText font-mono font-bold text-sm md:text-base border border-game-accent hover:opacity-90 transition-opacity flex items-center justify-center gap-2 uppercase tracking-widest tactical-border shadow-[0_0_20px_rgba(46,160,94,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Play fill="currentColor" size={18} />
                 Initiate Protocol
@@ -457,6 +470,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           <motion.button
             whileTap={{ scale: 0.95 }}
             onClick={handleShare}
+            aria-label="Share Link"
             className="w-14 md:w-16 flex items-center justify-center bg-game-panel border border-game-accent/30 text-game-accent hover:bg-game-accent/10 transition-colors rounded-sm"
           >
             <Share2 size={20} />
@@ -484,7 +498,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               <div className="p-6 space-y-6">
                 <div className="flex items-center justify-between border-b border-game-accent/20 pb-4">
                   <h2 className="text-lg font-mono font-bold text-white tracking-widest">SETTINGS</h2>
-                  <button onClick={() => setIsSettingsOpen(false)} className="text-tg-hint hover:text-white transition-colors">
+                  <button onClick={() => setIsSettingsOpen(false)} className="text-tg-hint hover:text-white transition-colors" aria-label="Close Settings">
                     <X size={20} />
                   </button>
                 </div>
@@ -497,7 +511,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                       {['ru', 'en'].map(lang => (
                         <button
                           key={lang}
-                          onClick={() => setInterfaceLang(lang as any)}
+                          onClick={() => setInterfaceLang(lang as Language)}
                           className={`px-3 py-1 text-[10px] font-mono rounded-sm transition-colors ${
                             interfaceLang === lang
                               ? 'bg-game-accent text-tg-buttonText font-bold'
@@ -528,7 +542,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                       onChange={(e) => setGeminiKey(e.target.value)}
                       className="w-full bg-black/40 border border-game-accent/30 rounded-sm px-4 py-3 text-sm text-white font-mono focus:outline-none focus:border-game-accent transition-colors"
                     />
-                    <p className="text-[9px] text-tg-hint mt-1.5 font-mono">Get free key at <a href="https://aistudio.google.com/api-keys" target="_blank" className="text-game-accent hover:underline">aistudio.google.com</a>.</p>
+                    <p className="text-[9px] text-tg-hint mt-1.5 font-mono">Get free key at <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-game-accent hover:underline">aistudio.google.com</a>.</p>
                   </div>
 
                   <div>
@@ -539,7 +553,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                       onChange={(e) => setNavyKey(e.target.value)}
                       className="w-full bg-black/40 border border-game-accent/30 rounded-sm px-4 py-3 text-sm text-white font-mono focus:outline-none focus:border-game-accent transition-colors"
                     />
-                    <p className="text-[9px] text-tg-hint mt-1.5 font-mono">Get key at: <a href="https://api.navy" target="_blank" className="text-game-accent hover:underline">api.navy</a>.</p>
+                    <p className="text-[9px] text-tg-hint mt-1.5 font-mono">Get key at: <a href="https://api.navy" target="_blank" rel="noopener noreferrer" className="text-game-accent hover:underline">api.navy</a>.</p>
                   </div>
                 </div>
 
