@@ -61,9 +61,16 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
       }
 
       const timer = setTimeout(async () => {
-           const stats = await SocketService.validateNavyApiKey(navyKey);
-           if (!isCancelled) {
-               setNavyStats(stats);
+           try {
+               const stats = await SocketService.validateNavyApiKey(navyKey);
+               if (!isCancelled) {
+                   setNavyStats(stats);
+               }
+           } catch (error) {
+               if (!isCancelled) {
+                   setNavyStats(null);
+                   console.error("Failed to validate Navy key:", error);
+               }
            }
       }, 800);
 
