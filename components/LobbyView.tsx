@@ -153,8 +153,8 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   };
 
   const handleShare = () => {
-      const shareUrl = `https://t.me/AgainstAI_Bot?startapp=${gameState.lobbyCode}`;
-      const shareText = t('shareLobbyText', interfaceLang) + ' ' + gameState.lobbyCode;
+      const shareUrl = `t.me/AgainstAIBot?startapp=${gameState.lobbyCode}`;
+      const shareText = `${t('shareLobbyText', interfaceLang)} \`${gameState.lobbyCode}\``;
       const fullUrl = `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareText)}`;
 
       if (window.Telegram?.WebApp?.openTelegramLink) {
