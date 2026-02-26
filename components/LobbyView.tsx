@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Terminal, Users, Cpu, Fingerprint, Crosshair, Share2, Play, AlertTriangle, Eye, Volume2, Globe, Check, Crown, ChevronDown, Settings, X } from 'lucide-react';
+import { Terminal, Users, Cpu, Fingerprint, Crosshair, Play, AlertTriangle, Eye, Volume2, Globe, Check, Crown, ChevronDown, Settings, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GameState, Player, GameMode, ScenarioType, ImageGenerationMode, LobbySettings, Language, AIModelLevel, NavyUsageResponse } from '../types';
 import { t, translations } from '../i18n';
@@ -19,6 +19,44 @@ interface LobbyViewProps {
 
 // Define translation key type for safety
 type TranslationKey = keyof typeof translations['en'];
+
+// --- Configuration Constants ---
+
+const GENRES: { id: ScenarioType, label: TranslationKey }[] = [
+    { id: ScenarioType.ANY, label: 'any' },
+    { id: ScenarioType.SCI_FI, label: 'scifi' },
+    { id: ScenarioType.SUPERNATURAL, label: 'supernatural' },
+    { id: ScenarioType.APOCALYPSE, label: 'apocalypse' },
+    { id: ScenarioType.FANTASY, label: 'fantasy' },
+    { id: ScenarioType.CYBERPUNK, label: 'cyberpunk' },
+    { id: ScenarioType.BACKROOMS, label: 'backrooms' },
+    { id: ScenarioType.SCP, label: 'scp' },
+    { id: ScenarioType.MINECRAFT, label: 'minecraft' },
+    { id: ScenarioType.HARRY_POTTER, label: 'harryPotter' },
+];
+
+const MODES: { id: GameMode, label: TranslationKey }[] = [
+    { id: GameMode.COOP, label: 'coop' },
+    { id: GameMode.PVP, label: 'pvp' },
+    { id: GameMode.BATTLE_ROYALE, label: 'battleRoyale' }
+];
+
+const AI_LEVELS: { id: AIModelLevel, label: TranslationKey, desc: TranslationKey }[] = [
+    { id: AIModelLevel.ECONOMY, label: 'economy', desc: 'economyDesc' },
+    { id: AIModelLevel.BALANCED, label: 'balanced', desc: 'balancedDesc' },
+    { id: AIModelLevel.PREMIUM, label: 'premium', desc: 'premiumDesc' },
+];
+
+const VOICE_OPTIONS: { id: 'SCENARIO' | 'RESULTS'; label: TranslationKey }[] = [
+    { id: 'SCENARIO', label: 'voiceoverScenario' },
+    { id: 'RESULTS', label: 'voiceoverResults' }
+];
+
+const IMAGE_OPTIONS: { id: ImageGenerationMode; label: TranslationKey }[] = [
+    { id: ImageGenerationMode.NONE, label: 'imgNone' },
+    { id: ImageGenerationMode.SCENARIO, label: 'imgScenario' },
+    { id: ImageGenerationMode.FULL, label: 'imgFull' }
+];
 
 export const LobbyView: React.FC<LobbyViewProps> = ({
     gameState,
@@ -83,41 +121,16 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   const voiceCount = navyStats ? Math.floor(navyStats.usage.tokens_remaining_today / 55000) : 0;
   const imageCount = navyStats ? Math.floor(navyStats.usage.tokens_remaining_today / 7500) : 0;
 
-  const genres: { id: ScenarioType, label: TranslationKey }[] = [
-    { id: ScenarioType.ANY, label: 'any' },
-    { id: ScenarioType.SCI_FI, label: 'scifi' },
-    { id: ScenarioType.SUPERNATURAL, label: 'supernatural' },
-    { id: ScenarioType.APOCALYPSE, label: 'apocalypse' },
-    { id: ScenarioType.FANTASY, label: 'fantasy' },
-    { id: ScenarioType.CYBERPUNK, label: 'cyberpunk' },
-    { id: ScenarioType.BACKROOMS, label: 'backrooms' },
-    { id: ScenarioType.SCP, label: 'scp' },
-    { id: ScenarioType.MINECRAFT, label: 'minecraft' },
-    { id: ScenarioType.HARRY_POTTER, label: 'harryPotter' },
-  ];
-
-  const modes: { id: GameMode, label: TranslationKey }[] = [
-      { id: GameMode.COOP, label: 'coop' },
-      { id: GameMode.PVP, label: 'pvp' },
-      { id: GameMode.BATTLE_ROYALE, label: 'battleRoyale' }
-  ];
-
-  const aiLevels: { id: AIModelLevel, label: TranslationKey, desc: TranslationKey }[] = [
-    { id: 'economy' as AIModelLevel, label: 'economy', desc: 'economyDesc' },
-    { id: 'balanced' as AIModelLevel, label: 'balanced', desc: 'balancedDesc' },
-    { id: 'premium' as AIModelLevel, label: 'premium', desc: 'premiumDesc' },
-  ];
-
   // Helper for voice options
   const isVoiceScenario = gameState.settings.voiceoverScenario;
   const isVoiceResults = gameState.settings.voiceoverResults;
 
-  const toggleVoice = (opt: 'SCENARIO' | 'RESULTS') => {
-      if (opt === 'SCENARIO') onUpdateSettings('voiceoverScenario', !isVoiceScenario);
-      if (opt === 'RESULTS') onUpdateSettings('voiceoverResults', !isVoiceResults);
+  const toggleVoice = (id: 'SCENARIO' | 'RESULTS') => {
+      if (id === 'SCENARIO') onUpdateSettings('voiceoverScenario', !isVoiceScenario);
+      if (id === 'RESULTS') onUpdateSettings('voiceoverResults', !isVoiceResults);
   };
 
-  const activeGenreKey = genres.find(g => g.id === gameState.settings.scenarioType)?.label || 'any';
+  const activeGenreKey = GENRES.find(g => g.id === gameState.settings.scenarioType)?.label || 'any';
   const activeGenreLabel = t(activeGenreKey, interfaceLang);
 
   // Close dropdown when clicking outside
@@ -229,7 +242,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                       transition={{ duration: 0.15 }}
                       className="absolute top-full left-0 right-0 mt-1 bg-game-panel border border-game-accent/40 shadow-xl z-50 max-h-60 overflow-y-auto rounded-sm"
                     >
-                      {genres.map(g => (
+                      {GENRES.map(g => (
                         <button
                           key={g.id}
                           onClick={() => {
@@ -256,7 +269,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   <Crosshair size={12} /> {t('protocol', interfaceLang)}
                 </div>
                 <div className="grid grid-cols-3 gap-1 bg-black/20 p-1 border border-game-accent/20 rounded-sm h-[42px]">
-                  {modes.map(m => {
+                  {MODES.map(m => {
                     const isActive = gameState.settings.mode === m.id;
                     return (
                       <button
@@ -289,7 +302,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                 <Cpu size={12} /> {t('aiCoreIntel', interfaceLang)}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {aiLevels.map(level => {
+                {AI_LEVELS.map(level => {
                   const isActive = gameState.settings.aiModelLevel === level.id;
                   return (
                     <button
@@ -327,15 +340,12 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   <Volume2 size={12} /> {t('audio', interfaceLang)}
                 </div>
                 <div className="space-y-2">
-                  {[
-                      { id: 'SCENARIO', label: 'voiceoverScenario', active: isVoiceScenario },
-                      { id: 'RESULTS', label: 'voiceoverResults', active: isVoiceResults }
-                  ].map(opt => {
-                    const isActive = opt.active;
+                  {VOICE_OPTIONS.map(opt => {
+                    const isActive = opt.id === 'SCENARIO' ? isVoiceScenario : isVoiceResults;
                     return (
                       <button
                         key={opt.id}
-                        onClick={() => canEdit && toggleVoice(opt.id as 'SCENARIO' | 'RESULTS')}
+                        onClick={() => canEdit && toggleVoice(opt.id)}
                         disabled={!canEdit}
                         className={`relative w-full text-left px-3 py-2.5 text-[10px] md:text-xs font-mono border rounded-sm transition-colors flex justify-between items-center overflow-hidden ${
                           isActive ? 'border-game-accent text-tg-buttonText' : 'border-game-accent/20 bg-black/30 text-tg-hint hover:border-game-accent/40'
@@ -349,7 +359,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                             transition={{ type: "spring", stiffness: 500, damping: 30 }}
                           />
                         )}
-                        <span className="relative z-10">{t(opt.label as TranslationKey, interfaceLang)}</span>
+                        <span className="relative z-10">{t(opt.label, interfaceLang)}</span>
                         <div className={`relative z-10 w-2 h-2 rounded-full ${isActive ? 'bg-tg-buttonText' : 'bg-transparent border border-tg-hint'}`} />
                       </button>
                     );
@@ -362,13 +372,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                   <Eye size={12} /> {t('visuals', interfaceLang)}
                 </div>
                 <div className="grid grid-cols-1 gap-2">
-                  {[
-                    { id: ImageGenerationMode.NONE, label: 'imgNone' },
-                    { id: ImageGenerationMode.SCENARIO, label: 'imgScenario' },
-                    { id: ImageGenerationMode.FULL, label: 'imgFull' }
-                  ].map(opt => {
+                  {IMAGE_OPTIONS.map(opt => {
                     const isActive = gameState.settings.imageGenerationMode === opt.id;
-                    const label = t(opt.label as TranslationKey, interfaceLang);
+                    const label = t(opt.label, interfaceLang);
                     return (
                       <button
                         key={opt.id}
