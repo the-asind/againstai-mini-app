@@ -120,6 +120,11 @@ export const translations = {
     interfaceLang: "INTERFACE LANG",
     callsign: "CALLSIGN (NICKNAME)",
     saveData: "SAVE DATA",
+    shareLobbyText: "Join my lobby in Against AI! Code:",
+    statsPlan: "Plan:",
+    statsTokens: "Tokens:",
+    statsEstVoices: "Est. Voices:",
+    statsEstImages: "Est. Images:",
   },
   ru: {
     createLobby: "Создать лобби",
@@ -240,6 +245,11 @@ export const translations = {
     interfaceLang: "ЯЗЫК ИНТЕРФЕЙСА",
     callsign: "ПОЗЫВНОЙ (НИК)",
     saveData: "СОХРАНИТЬ ДАННЫЕ",
+    shareLobbyText: "Присоединяйся к лобби в Against AI! Код:",
+    statsPlan: "План:",
+    statsTokens: "Токены:",
+    statsEstVoices: "Голос (~):",
+    statsEstImages: "Фото (~):",
   }
 };
 
