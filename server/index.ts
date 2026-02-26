@@ -165,6 +165,12 @@ io.on('connection', (socket) => {
       }
   });
 
+  socket.on('get_aggregate_navy_usage', ({ code }: { code: string }) => {
+      if (lobbyService.isCaptain(code, user.id.toString())) {
+          lobbyService.getAggregateNavyUsage(code, user.id.toString());
+      }
+  });
+
   socket.on('start_game', ({ code }: { code: string }) => {
       if (lobbyService.isCaptain(code, user.id.toString())) {
           lobbyService.startGame(code, user.id.toString());

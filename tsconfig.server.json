@@ -1,7 +1,8 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "module": "commonjs",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "outDir": "./dist-server",
     "target": "es2020",
     "lib": ["es2020"],
@@ -10,9 +11,12 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "moduleResolution": "node",
     "noEmit": false,
     "allowImportingTsExtensions": false
+  },
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifierResolution": "node"
   },
   "include": ["server/**/*", "types.ts", "constants.ts"],
   "exclude": ["src/**/*", "node_modules", "**/*.test.ts"]
