@@ -7,6 +7,7 @@ import { NavyService } from './navyService';
 import { KeyManager } from '../utils/keyManager';
 import { saveImage } from '../utils/fileStorage';
 import { CONFIG } from '../config';
+import { ABSTRACT_TWISTS } from '../archetypes/twists';
 
 interface Lobby {
     lobbyCode: string;
@@ -20,6 +21,7 @@ interface Lobby {
     geminiKeys: string[];
     navyKeys: string[];
     resultsRevealed: boolean;
+    playerSecrets?: Record<string, string>; // Map<playerId, secretText>
 }
 
 export class LobbyService {
@@ -368,7 +370,7 @@ export class LobbyService {
 
             const lang = lobby.settings.storyLanguage || 'en';
 
-            const scenario = await GeminiService.generateScenario(
+            const scenarioResponse = await GeminiService.generateScenario(
                 keyManager,
                 lobby.settings.mode,
                 lobby.settings.scenarioType,
@@ -377,7 +379,7 @@ export class LobbyService {
                 lobby.settings.aiModelLevel
             );
 
-            lobby.scenario = scenario;
+            lobby.scenario = scenarioResponse;
 
             // Image Generation (SCENARIO)
             if (lobby.settings.imageGenerationMode !== ImageGenerationMode.NONE) {
@@ -385,7 +387,7 @@ export class LobbyService {
                     // Check if we have Navy keys for image generation
                     if (lobby.navyKeys.length > 0) {
                         const navyKeyManager: KeyManager = new KeyManager(lobby.navyKeys[0], lobby.navyKeys.slice(1));
-                        const prompt = `create image рассказа ниже. Изображай игроков в ситуации в виде чёрных силуэтов. Стиль реализма, кадр снят от лица "наблюдателя" откуда-то сверху, создавая эффект "подглядывания" за героями. Картика показывает всю "красоту" помещения и располагает к себе внимание завораживая. Все элементы хитро переплетены на холсте:\n${scenario.scenario_text}`;
+                        const prompt = `create image рассказа ниже. Изображай игроков в ситуации в виде чёрных силуэтов. Стиль реализма, кадр снят от лица "наблюдателя" откуда-то сверху, создавая эффект "подглядывания" за героями. Картика показывает всю "красоту" помещения и располагает к себе внимание завораживая. Все элементы хитро переплетены на холсте:\n${scenarioResponse.scenario_text}`;
 
                         const base64 = await ImageService.generateImage(navyKeyManager, prompt);
                         if (base64) {
@@ -406,7 +408,7 @@ export class LobbyService {
             if (lobby.settings.voiceoverScenario) {
                 if (lobby.navyKeys.length > 0) {
                     const navyKeyManager = new KeyManager(lobby.navyKeys[0], lobby.navyKeys.slice(1));
-                    const voiceUrl = await VoiceService.generateVoice(navyKeyManager, scenario.scenario_text);
+                    const voiceUrl = await VoiceService.generateVoice(navyKeyManager, scenarioResponse.scenario_text);
                     if (voiceUrl) {
                         lobby.scenarioAudio = voiceUrl;
                     }
@@ -424,6 +426,25 @@ export class LobbyService {
             this.emitUpdate(code);
         }
     }
+
+    // --- Send Private Secrets ---
+    private emitSecrets(code: string) {
+        const lobby = this.lobbies.get(code);
+        if (!lobby || !lobby.playerSecrets) return;
+
+        lobby.players.forEach(p => {
+            const secret = lobby.playerSecrets![p.id];
+            if (secret) {
+                const sockets = this.playerSockets.get(p.id);
+                if (sockets) {
+                    sockets.forEach(socketId => {
+                        this.io.to(socketId).emit('secret_data', { secret });
+                    });
+                }
+            }
+        });
+    }
+    // ----------------------------
 
     private startRound(code: string) {
         const lobby = this.lobbies.get(code);
@@ -532,9 +553,52 @@ export class LobbyService {
                 safeScenario,
                 lobby.players,
                 lobby.settings.mode,
+                lobby.playerSecrets, // Pass secrets to judge
                 lang,
                 lobby.settings.aiModelLevel
             );
+
+            // --- SECRET DATA GENERATION ---
+            const twistChance = 0.2; // 20% Chance for Twist
+            const hasTwist = Math.random() < twistChance;
+            let twistType = "NONE";
+            let chosenPlayerId: string | null = null;
+
+            if (hasTwist && lobby.players.length > 0) {
+                // Pick a random player for the twist
+                const randomPlayer = lobby.players[Math.floor(Math.random() * lobby.players.length)];
+                chosenPlayerId = randomPlayer.id;
+
+                // Pick a random twist type from available twists (excluding NONE)
+                const availableTwists = ABSTRACT_TWISTS.filter(t => t !== "NONE");
+                if (availableTwists.length > 0) {
+                    twistType = availableTwists[Math.floor(Math.random() * availableTwists.length)];
+                } else {
+                    twistType = "TRAITOR"; // Fallback
+                }
+            }
+
+            try {
+                const secrets = await GeminiService.generateSecrets(
+                    keyManager,
+                    safeScenario,
+                    lobby.players,
+                    lang,
+                    lobby.settings.aiModelLevel,
+                    twistType,
+                    chosenPlayerId
+                );
+
+                lobby.playerSecrets = secrets;
+
+                // Emit secrets to players INDIVIDUALLY
+                this.emitSecrets(code);
+
+            } catch (e) {
+                console.error("Failed to generate secrets:", e);
+                // Non-critical, continue without secrets
+            }
+            // ------------------------------
 
             // Image Generation (RESULTS)
             if (lobby.settings.imageGenerationMode === ImageGenerationMode.FULL) {
@@ -614,6 +678,7 @@ export class LobbyService {
         lobby.roundResult = undefined;
         lobby.geminiKeys = [];
         lobby.navyKeys = [];
+        lobby.playerSecrets = undefined; // Clear secrets
 
         lobby.resultsRevealed = false;
         lobby.players.forEach(p => {

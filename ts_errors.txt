@@ -1,0 +1,38 @@
+App.tsx(240,82): error TS2339: Property 'themeParams' does not exist on type 'TelegramWebApp'.
+App.tsx(241,84): error TS2339: Property 'themeParams' does not exist on type 'TelegramWebApp'.
+App.tsx(242,84): error TS2339: Property 'themeParams' does not exist on type 'TelegramWebApp'.
+App.tsx(243,84): error TS2339: Property 'themeParams' does not exist on type 'TelegramWebApp'.
+App.tsx(244,86): error TS2339: Property 'themeParams' does not exist on type 'TelegramWebApp'.
+App.tsx(245,91): error TS2339: Property 'themeParams' does not exist on type 'TelegramWebApp'.
+App.tsx(246,92): error TS2339: Property 'themeParams' does not exist on type 'TelegramWebApp'.
+App.tsx(688,59): error TS2322: Type '{ onComplete: (code: string) => Promise<void>; label: string; }' is not assignable to type 'IntrinsicAttributes & CodeInputProps'.
+  Property 'label' does not exist on type 'IntrinsicAttributes & CodeInputProps'.
+App.tsx(701,32): error TS2322: Type '{ message: string; type: "error" | "success"; }' is not assignable to type 'IntrinsicAttributes & ToastProps'.
+  Property 'message' does not exist on type 'IntrinsicAttributes & ToastProps'.
+App.tsx(726,30): error TS2322: Type '{ message: string; type: "error" | "success"; }' is not assignable to type 'IntrinsicAttributes & ToastProps'.
+  Property 'message' does not exist on type 'IntrinsicAttributes & ToastProps'.
+components/MarkdownDisplay.tsx(53,39): error TS2322: Type '{ ref?: Ref<HTMLPreElement>; key?: Key; defaultChecked?: boolean; defaultValue?: string | number | readonly string[]; suppressContentEditableWarning?: boolean; suppressHydrationWarning?: boolean; ... 273 more ...; onTransitionStartCapture?: TransitionEventHandler<...>; }' is not assignable to type 'DetailedHTMLProps<HTMLAttributes<HTMLDivElement>, HTMLDivElement>'.
+  Type '{ ref?: Ref<HTMLPreElement>; key?: Key; defaultChecked?: boolean; defaultValue?: string | number | readonly string[]; suppressContentEditableWarning?: boolean; suppressHydrationWarning?: boolean; ... 273 more ...; onTransitionStartCapture?: TransitionEventHandler<...>; }' is not assignable to type 'ClassAttributes<HTMLDivElement>'.
+    Types of property 'ref' are incompatible.
+      Type 'Ref<HTMLPreElement>' is not assignable to type 'Ref<HTMLDivElement>'.
+        Type '(instance: HTMLPreElement) => void | (() => VoidOrUndefinedOnly)' is not assignable to type 'Ref<HTMLDivElement>'.
+          Type '(instance: HTMLPreElement) => void | (() => VoidOrUndefinedOnly)' is not assignable to type '(instance: HTMLDivElement) => void | (() => VoidOrUndefinedOnly)'.
+            Types of parameters 'instance' and 'instance' are incompatible.
+              Property 'width' is missing in type 'HTMLDivElement' but required in type 'HTMLPreElement'.
+server/services/lobbyService.test.ts(1,53): error TS2307: Cannot find module 'bun:test' or its corresponding type declarations.
+server/services/lobbyService.test.ts(6,30): error TS2339: Property 'dir' does not exist on type 'ImportMeta'.
+server/services/lobbyService.test.ts(19,30): error TS2339: Property 'dir' does not exist on type 'ImportMeta'.
+server/services/lobbyService.test.ts(27,30): error TS2339: Property 'dir' does not exist on type 'ImportMeta'.
+server/services/lobbyService.test.ts(87,54): error TS2345: Argument of type '{ timeLimitSeconds: number; charLimit: number; mode: GameMode; scenarioType: ScenarioType; storyLanguage: "en"; aiModelLevel: "premium"; imageGenerationMode: ImageGenerationMode; }' is not assignable to parameter of type 'LobbySettings'.
+  Type '{ timeLimitSeconds: number; charLimit: number; mode: GameMode; scenarioType: ScenarioType; storyLanguage: "en"; aiModelLevel: "premium"; imageGenerationMode: ImageGenerationMode; }' is missing the following properties from type 'LobbySettings': voiceoverScenario, voiceoverResults
+server/services/lobbyService.test.ts(98,49): error TS2345: Argument of type '{ timeLimitSeconds: number; charLimit: number; mode: GameMode; scenarioType: ScenarioType; storyLanguage: "en"; aiModelLevel: "premium"; imageGenerationMode: ImageGenerationMode; }' is not assignable to parameter of type 'LobbySettings'.
+  Type '{ timeLimitSeconds: number; charLimit: number; mode: GameMode; scenarioType: ScenarioType; storyLanguage: "en"; aiModelLevel: "premium"; imageGenerationMode: ImageGenerationMode; }' is missing the following properties from type 'LobbySettings': voiceoverScenario, voiceoverResults
+server/services/lobbyService.test.ts(115,51): error TS2345: Argument of type '{ timeLimitSeconds: number; charLimit: number; mode: GameMode; scenarioType: ScenarioType; storyLanguage: "en"; aiModelLevel: "premium"; imageGenerationMode: ImageGenerationMode; }' is not assignable to parameter of type 'LobbySettings'.
+  Type '{ timeLimitSeconds: number; charLimit: number; mode: GameMode; scenarioType: ScenarioType; storyLanguage: "en"; aiModelLevel: "premium"; imageGenerationMode: ImageGenerationMode; }' is missing the following properties from type 'LobbySettings': voiceoverScenario, voiceoverResults
+server/services/lobbyService.test.ts(137,51): error TS2345: Argument of type '{ timeLimitSeconds: number; charLimit: number; mode: GameMode; scenarioType: ScenarioType; storyLanguage: "en"; aiModelLevel: "premium"; imageGenerationMode: ImageGenerationMode; }' is not assignable to parameter of type 'LobbySettings'.
+  Type '{ timeLimitSeconds: number; charLimit: number; mode: GameMode; scenarioType: ScenarioType; storyLanguage: "en"; aiModelLevel: "premium"; imageGenerationMode: ImageGenerationMode; }' is missing the following properties from type 'LobbySettings': voiceoverScenario, voiceoverResults
+server/services/lobbyService.test.ts(159,51): error TS2345: Argument of type '{ timeLimitSeconds: number; charLimit: number; mode: GameMode; scenarioType: ScenarioType; storyLanguage: "en"; aiModelLevel: "premium"; imageGenerationMode: ImageGenerationMode; }' is not assignable to parameter of type 'LobbySettings'.
+  Type '{ timeLimitSeconds: number; charLimit: number; mode: GameMode; scenarioType: ScenarioType; storyLanguage: "en"; aiModelLevel: "premium"; imageGenerationMode: ImageGenerationMode; }' is missing the following properties from type 'LobbySettings': voiceoverScenario, voiceoverResults
+server/services/navyService.test.ts(1,69): error TS2307: Cannot find module 'bun:test' or its corresponding type declarations.
+server/utils/telegramAuth.test.ts(1,68): error TS2307: Cannot find module 'bun:test' or its corresponding type declarations.
+services/socketService.ts(5,25): error TS2339: Property 'env' does not exist on type 'ImportMeta'.

@@ -154,6 +154,76 @@ export const GeminiService = {
   },
 
   /**
+   * Generates secret data for players (Asymmetric Gameplay).
+   */
+  generateSecrets: async (
+    keyManager: KeyManager,
+    scenario: ScenarioResponse,
+    players: Player[],
+    language: Language,
+    aiLevel: AIModelLevel,
+    twistType: string, // "TRAITOR", "INFECTED", "NONE", etc.
+    chosenPlayerId: string | null
+  ): Promise<Record<string, string>> => {
+
+      return keyManager.executeWithRetry(async (apiKey) => {
+          const ai = getClient(apiKey);
+          const modelName = getModelName(aiLevel, 'SMART'); // Use smart model for complex context
+
+          const playersJson = JSON.stringify(players.map(p => ({ id: p.id, name: p.name })));
+          const langName = language === 'ru' ? 'Russian' : 'English';
+
+          const prompt = SYSTEM_INSTRUCTIONS.SECRET_GENERATOR
+            .replace('{{SCENARIO_TEXT}}', scenario.scenario_text)
+            .replace('{{GM_NOTES}}', JSON.stringify(scenario.gm_notes))
+            .replace('{{PLAYERS_JSON}}', playersJson)
+            .replace('{{CHOSEN_PLAYER_ID}}', chosenPlayerId || "NULL")
+            .replace('{{TWIST_TYPE}}', twistType)
+            .replace('{{LANGUAGE}}', langName);
+
+          console.log(`[Gemini Request] Model: ${modelName}, Task: SECRET_GENERATOR`);
+
+          const response = await ai.models.generateContent({
+              model: modelName,
+              contents: prompt,
+              config: {
+                  responseMimeType: "application/json",
+                  responseSchema: {
+                      type: Type.OBJECT,
+                      properties: {
+                          secrets: {
+                              type: Type.OBJECT,
+                              // Dynamic keys are tricky in strict schema, but we can try just Type.OBJECT
+                              // Or rely on the prompt to output correct JSON structure and parse loosely.
+                              // Since player IDs are dynamic, we can't define strict properties.
+                              // However, Gemini allows Map<String, String> if we don't enforce strict schema validation for the map keys.
+                              // Let's try to define it without properties to allow any keys,
+                              // OR use text output and parse JSON manually if schema is too restrictive.
+                              // Actually, recent Gemini versions handle dynamic JSON better if we don't lock properties.
+                          }
+                      },
+                      required: ["secrets"]
+                  }
+              }
+          });
+
+          const text = response.text;
+          if (!text) throw new Error("Empty secret response");
+
+          try {
+              const json = JSON.parse(text) as { secrets: Record<string, string> };
+              return json.secrets;
+          } catch (e) {
+              console.warn("Failed to parse secrets JSON:", e);
+              // Fallback: everyone gets a generic message
+              const fallback: Record<string, string> = {};
+              players.forEach(p => fallback[p.id] = language === 'ru' ? "У вас плохое предчувствие..." : "You have a bad feeling...");
+              return fallback;
+          }
+      });
+  },
+
+  /**
    * Checks for player cheating/injection.
    */
   checkInjection: async (keyManager: KeyManager, actionText: string): Promise<{ isCheat: boolean; reason?: string }> => {
@@ -201,6 +271,7 @@ export const GeminiService = {
     scenario: ScenarioResponse,
     players: Player[],
     mode: GameMode,
+    playerSecrets?: Record<string, string>, // Optional context
     language: Language = 'en',
     aiLevel: AIModelLevel = AIModelLevel.BALANCED
   ): Promise<RoundResult> => {
@@ -233,6 +304,7 @@ export const GeminiService = {
             let prompt = SYSTEM_INSTRUCTIONS.JUDGE_BASE
                 .replace('{{SCENARIO_TEXT}}', JSON.stringify(scenario, null, 2))
                 .replace('{{PLAYER_ACTIONS_JSON}}', JSON.stringify(inputs, null, 2))
+                .replace('{{PLAYER_SECRETS_JSON}}', JSON.stringify(playerSecrets || {}, null, 2))
                 .replace('{{GAME_MODE}}', modeInstruction);
 
             // Prepend language instruction

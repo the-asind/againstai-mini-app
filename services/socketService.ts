@@ -7,12 +7,14 @@ const URL = import.meta.env.VITE_API_URL || undefined; // undefined = auto-detec
 type GameStateCallback = (state: GameState) => void;
 type ErrorCallback = (error: { message: string }) => void;
 type NavyAggregateCallback = (data: { totalTokens: number, contributors: number }) => void;
+type SecretCallback = (data: { secret: string }) => void;
 
 class SocketServiceImpl {
   private socket: Socket | null = null;
   private subscribers: GameStateCallback[] = [];
   private errorSubscribers: ErrorCallback[] = [];
   private navyAggregateSubscribers: NavyAggregateCallback[] = [];
+  private secretSubscribers: SecretCallback[] = [];
 
   // Session State for Reconnection
   private currentLobbyCode: string | null = null;
@@ -70,6 +72,10 @@ class SocketServiceImpl {
     this.socket.on('navy_aggregate_stats', (data: { totalTokens: number, contributors: number }) => {
         this.notifyNavyAggregateSubscribers(data);
     });
+
+    this.socket.on('secret_data', (data: { secret: string }) => {
+        this.notifySecretSubscribers(data);
+    });
   }
 
   public subscribe(callback: GameStateCallback): () => void {
@@ -90,6 +96,13 @@ class SocketServiceImpl {
       this.navyAggregateSubscribers.push(callback);
       return () => {
           this.navyAggregateSubscribers = this.navyAggregateSubscribers.filter(s => s !== callback);
+      };
+  }
+
+  public subscribeToSecretData(callback: SecretCallback): () => void {
+      this.secretSubscribers.push(callback);
+      return () => {
+          this.secretSubscribers = this.secretSubscribers.filter(s => s !== callback);
       };
   }
 
@@ -206,6 +219,10 @@ class SocketServiceImpl {
 
   private notifyNavyAggregateSubscribers(data: { totalTokens: number, contributors: number }) {
       this.navyAggregateSubscribers.forEach(callback => callback(data));
+  }
+
+  private notifySecretSubscribers(data: { secret: string }) {
+      this.secretSubscribers.forEach(callback => callback(data));
   }
 }
 
