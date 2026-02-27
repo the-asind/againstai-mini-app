@@ -267,21 +267,19 @@ const App: React.FC = () => {
             const savedNavyKey = localStorage.getItem(STORAGE_KEYS.NAVY_KEY);
             if (savedNavyKey) setSettingsNavyApiKey(savedNavyKey);
 
-            // Auto-create player object if we have saved data
-            if (savedNick) {
-                const userObj = window.Telegram?.WebApp?.initDataUnsafe?.user;
-                const newPlayer: Player = {
-                    id: userObj?.id?.toString() || Math.random().toString(36).substr(2, 9), // Fallback ID
-                    name: savedNick,
-                    isCaptain: false, // Will be set by server on create
-                    status: 'waiting',
-                    isOnline: true,
-                    keyCount: getKeyCount(),
-                    avatarUrl: userObj?.username ? `https://t.me/i/userpic/320/${userObj.username}.jpg` : undefined
-                };
-                setUser(newPlayer);
-                userIdRef.current = newPlayer.id; // Important for immediate socket auth
-            }
+            // Auto-create player object from Telegram Data or Mock
+            const userObj = window.Telegram?.WebApp?.initDataUnsafe?.user;
+            const newPlayer: Player = {
+                id: userObj?.id?.toString() || Math.random().toString(36).substr(2, 9), // Fallback ID
+                name: savedNick || userObj?.first_name || "Player_" + Math.floor(Math.random() * 1000),
+                isCaptain: false, // Will be set by server on create
+                status: 'waiting',
+                isOnline: true,
+                keyCount: getKeyCount(),
+                avatarUrl: userObj?.username ? `https://t.me/i/userpic/320/${userObj.username}.jpg` : undefined
+            };
+            setUser(newPlayer);
+            userIdRef.current = newPlayer.id; // Important for immediate socket auth
         };
 
         // Socket Subscriptions
@@ -334,16 +332,13 @@ const App: React.FC = () => {
         if (autoJoinCode && user && !gameState.lobbyCode) {
 
             if (isSocketConnected) {
-                if (!loading) { // Prevent spamming
-                    handleJoinLobby(autoJoinCode);
-                    // We do NOT clear autoJoinCode immediately here, wait for success or failure?
-                    // Actually, to prevent loop, we should clear it or set a flag "joining".
-                    // handleJoinLobby sets loading=true.
-                    setAutoJoinCode(null); // Clear to prevent retry loop if it fails logic
-                }
+                // Clear the code first to prevent any potential retry loop if handleJoinLobby fails
+                const codeToJoin = autoJoinCode;
+                setAutoJoinCode(null);
+                handleJoinLobby(codeToJoin);
             } else {
-                // Not connected yet. Show loading state?
-                setLoading(true); // Persist loading state
+                // Not connected yet. Show loading state.
+                if (!loading) setLoading(true); // Persist loading state until connected
             }
         }
     }, [autoJoinCode, user, gameState.lobbyCode, isSocketConnected, loading]);
