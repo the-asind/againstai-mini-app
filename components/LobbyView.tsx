@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Terminal, Users, Cpu, Fingerprint, Crosshair, Play, AlertTriangle, Eye, Volume2, Globe, Check, Crown, ChevronDown, Settings, X } from 'lucide-react';
+import { Terminal, Users, Cpu, Fingerprint, Crosshair, Play, AlertTriangle, Eye, Volume2, Globe, Check, Crown, ChevronDown, Settings, X, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GameState, Player, GameMode, ScenarioType, ImageGenerationMode, LobbySettings, Language, AIModelLevel, NavyUsageResponse } from '../types';
 import { t, translations } from '../i18n';
@@ -81,6 +81,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   // Navy Stats State
   const [navyStats, setNavyStats] = useState<NavyUsageResponse | null>(null);
 
+  // Aggregate Stats State
+  const [aggregateStats, setAggregateStats] = useState<{ totalTokens: number, contributors: number } | null>(null);
+  const [isLoadingAggregate, setIsLoadingAggregate] = useState(false);
+
   // Update local settings state when props change
   useEffect(() => {
       setNickname(initialNick);
@@ -117,6 +121,23 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           clearTimeout(timer);
       };
   }, [navyKey]);
+
+  // Subscription for Aggregate Stats
+  useEffect(() => {
+      const unsub = SocketService.subscribeToNavyAggregate((data) => {
+          setAggregateStats(data);
+          setIsLoadingAggregate(false);
+      });
+      return () => unsub();
+  }, []);
+
+  const fetchAggregateStats = () => {
+      if (gameState.lobbyCode && user?.isCaptain) {
+          setIsLoadingAggregate(true);
+          setAggregateStats(null);
+          SocketService.getAggregateNavyUsage(gameState.lobbyCode);
+      }
+  };
 
   const voiceCount = navyStats ? Math.floor(navyStats.usage.tokens_remaining_today / 55000) : 0;
   const imageCount = navyStats ? Math.floor(navyStats.usage.tokens_remaining_today / 7500) : 0;
@@ -622,6 +643,45 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                      </div>
                     )}
                   </div>
+
+                  {/* SQUAD RESOURCES (Captain Only) */}
+                  {canEdit && (
+                      <div className="bg-game-accent/10 border border-game-accent/20 rounded-sm p-3 space-y-2 mt-4">
+                          <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-mono text-game-accent uppercase tracking-wider flex items-center gap-2">
+                                  <Users size={12} /> SQUAD RESOURCES
+                              </span>
+                              <button
+                                  onClick={fetchAggregateStats}
+                                  disabled={isLoadingAggregate}
+                                  className="text-tg-hint hover:text-white transition-colors"
+                              >
+                                  <RefreshCw size={12} className={isLoadingAggregate ? 'animate-spin' : ''} />
+                              </button>
+                          </div>
+
+                          {aggregateStats ? (
+                              <div className="text-[10px] font-mono space-y-1">
+                                  <div className="flex justify-between">
+                                      <span className="text-tg-hint">Total Tokens:</span>
+                                      <span className="font-bold text-white">{(aggregateStats.totalTokens / 1000).toFixed(1)}k</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                      <span className="text-tg-hint">Contributors:</span>
+                                      <span className="font-bold text-white">{aggregateStats.contributors}</span>
+                                  </div>
+                                  <div className="text-[9px] text-tg-hint italic mt-1 border-t border-white/10 pt-1">
+                                      ~ {Math.floor(aggregateStats.totalTokens / 55000)} voices / {Math.floor(aggregateStats.totalTokens / 7500)} images total
+                                  </div>
+                              </div>
+                          ) : (
+                              <div className="text-[10px] text-tg-hint italic text-center py-2">
+                                  Tap refresh to scan squad keys...
+                              </div>
+                          )}
+                      </div>
+                  )}
+
                 </div>
 
                 <div className="flex gap-3 pt-4 border-t border-game-accent/20">

@@ -3,6 +3,7 @@ import { GameState, GameStatus, LobbySettings, Player, ImageGenerationMode, Scen
 import { GeminiService } from './geminiService';
 import { ImageService } from './imageService';
 import { VoiceService } from './voiceService';
+import { NavyService } from './navyService';
 import { KeyManager } from '../utils/keyManager';
 import { saveImage } from '../utils/fileStorage';
 import { CONFIG } from '../config';
@@ -26,6 +27,9 @@ export class LobbyService {
   private io: Server;
   private keyCollectors: Map<string, Map<string, { gemini?: string, navy?: string }>> = new Map();
   private timers: Map<string, NodeJS.Timeout> = new Map();
+
+  // Socket Tracking (Basic implementation for online status)
+  private playerSockets: Map<string, Set<string>> = new Map();
 
   constructor(io: Server) {
     this.io = io;
@@ -110,9 +114,6 @@ export class LobbyService {
     this.emitUpdate(code);
     return true;
   }
-
-  // Socket Tracking (Basic implementation for online status)
-  private playerSockets: Map<string, Set<string>> = new Map();
 
   private trackSocket(playerId: string, socketId: string) {
       if (!this.playerSockets.has(playerId)) {
@@ -237,6 +238,99 @@ export class LobbyService {
 
       lobby.geminiKeys = geminiKeys;
       lobby.navyKeys = navyKeys;
+  }
+
+  // --- Aggregate Stats Feature ---
+  public async getAggregateNavyUsage(code: string, playerId: string) {
+      if (!this.isCaptain(code, playerId)) return;
+      const lobby = this.lobbies.get(code);
+      if (!lobby) return;
+
+      // Prevent race condition: if keys are already being collected (e.g. game start), abort stats check.
+      if (this.keyCollectors.has(code)) {
+          console.warn(`[LobbyService] Stats check aborted for lobby ${code} - collection already in progress.`);
+          const socketId = this.playerSockets.get(playerId)?.values().next().value;
+          if (socketId) this.io.to(socketId).emit('navy_aggregate_stats', { totalTokens: 0, contributors: 0 }); // Or emit error? For now, return 0/0 is safer than breaking UI.
+          return;
+      }
+
+      // Reuse collectKeys mechanism to get all current keys
+      this.keyCollectors.set(code, new Map());
+
+      // Request keys from all online players
+      this.io.to(code).emit('request_keys');
+
+      // Wait for keys (max 3 seconds for stats check)
+      const onlinePlayers = lobby.players.filter(p => p.isOnline).length;
+
+      await new Promise<void>(resolve => {
+          let resolved = false;
+          const timeout = setTimeout(() => {
+              resolved = true;
+              resolve();
+          }, 3000);
+
+          const interval = setInterval(() => {
+              if (resolved) {
+                  clearInterval(interval);
+                  return;
+              }
+              // Race check: if map was deleted (e.g. by another concurrent process finishing?), stop.
+              if (!this.keyCollectors.has(code)) {
+                  resolved = true;
+                  clearTimeout(timeout);
+                  clearInterval(interval);
+                  resolve();
+                  return;
+              }
+
+              if (this.keyCollectors.get(code)!.size >= onlinePlayers) {
+                  resolved = true;
+                  clearTimeout(timeout);
+                  clearInterval(interval);
+                  resolve();
+              }
+          }, 100);
+      });
+
+      const collectedMap = this.keyCollectors.get(code);
+      this.keyCollectors.delete(code);
+
+      if (!collectedMap || collectedMap.size === 0) {
+           const socketId = this.playerSockets.get(playerId)?.values().next().value;
+           if (socketId) this.io.to(socketId).emit('navy_aggregate_stats', { totalTokens: 0, contributors: 0 });
+           return;
+      }
+
+      const uniqueNavyKeys = new Set<string>();
+
+      collectedMap.forEach((keys) => {
+          if (keys.navy && keys.navy.length > 10) {
+              uniqueNavyKeys.add(keys.navy);
+          }
+      });
+
+      let totalTokens = 0;
+      let contributors = 0;
+
+      // Validate each unique key and sum up
+      const validations = Array.from(uniqueNavyKeys).map(async (key) => {
+          const usage = await NavyService.getUsage(key);
+          if (usage) {
+              return usage.usage.tokens_remaining_today;
+          }
+          return 0;
+      });
+
+      const results = await Promise.all(validations);
+      totalTokens = results.reduce((acc, curr) => acc + curr, 0);
+      contributors = results.filter(t => t > 0).length;
+
+      // Emit back to captain only
+      const captainSocketId = this.playerSockets.get(playerId)?.values().next().value;
+      if (captainSocketId) {
+          this.io.to(captainSocketId).emit('navy_aggregate_stats', { totalTokens, contributors });
+      }
   }
 
   public async startGame(code: string, playerId: string) {

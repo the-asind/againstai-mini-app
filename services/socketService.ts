@@ -6,11 +6,13 @@ const URL = import.meta.env.VITE_API_URL || undefined; // undefined = auto-detec
 
 type GameStateCallback = (state: GameState) => void;
 type ErrorCallback = (error: { message: string }) => void;
+type NavyAggregateCallback = (data: { totalTokens: number, contributors: number }) => void;
 
 class SocketServiceImpl {
   private socket: Socket | null = null;
   private subscribers: GameStateCallback[] = [];
   private errorSubscribers: ErrorCallback[] = [];
+  private navyAggregateSubscribers: NavyAggregateCallback[] = [];
 
   // Session State for Reconnection
   private currentLobbyCode: string | null = null;
@@ -64,6 +66,10 @@ class SocketServiceImpl {
             });
         }
     });
+
+    this.socket.on('navy_aggregate_stats', (data: { totalTokens: number, contributors: number }) => {
+        this.notifyNavyAggregateSubscribers(data);
+    });
   }
 
   public subscribe(callback: GameStateCallback): () => void {
@@ -78,6 +84,17 @@ class SocketServiceImpl {
       return () => {
           this.errorSubscribers = this.errorSubscribers.filter(s => s !== callback);
       };
+  }
+
+  public subscribeToNavyAggregate(callback: NavyAggregateCallback): () => void {
+      this.navyAggregateSubscribers.push(callback);
+      return () => {
+          this.navyAggregateSubscribers = this.navyAggregateSubscribers.filter(s => s !== callback);
+      };
+  }
+
+  public isConnected(): boolean {
+      return this.socket?.connected || false;
   }
 
   public async validateApiKey(apiKey: string): Promise<boolean> {
@@ -147,6 +164,10 @@ class SocketServiceImpl {
       }
   }
 
+  public getAggregateNavyUsage(code: string) {
+      this.socket?.emit('get_aggregate_navy_usage', { code });
+  }
+
   public startGame(code: string) {
       this.socket?.emit('start_game', { code });
   }
@@ -181,6 +202,10 @@ class SocketServiceImpl {
 
   private notifyErrorSubscribers(error: { message: string }) {
       this.errorSubscribers.forEach(callback => callback(error));
+  }
+
+  private notifyNavyAggregateSubscribers(data: { totalTokens: number, contributors: number }) {
+      this.navyAggregateSubscribers.forEach(callback => callback(data));
   }
 }
 

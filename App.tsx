@@ -163,6 +163,14 @@ const App: React.FC = () => {
   };
 
   const [user, setUser] = useState<Player | null>(null);
+  const userIdRef = useRef<string | null>(null); // Ref to track user ID for stale closures
+
+  // Sync ref with user state
+  useEffect(() => {
+      if (user?.id) {
+          userIdRef.current = user.id;
+      }
+  }, [user]);
   
   // 2. Load Settings (Lazy Init)
   const [initialSettings] = useState<LobbySettings>(() => {
@@ -193,6 +201,7 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [autoJoinCode, setAutoJoinCode] = useState<string | null>(null);
+  const [isSocketConnected, setIsSocketConnected] = useState(false);
 
   // Settings Modal State
   const [settingsNick, setSettingsNick] = useState('');
@@ -210,6 +219,7 @@ const App: React.FC = () => {
 
   // -- Effects --
 
+  // 1. Initial Setup Effect (Run Once)
   useEffect(() => {
     const initApp = async () => {
         // Init Telegram WebApp
@@ -258,6 +268,7 @@ const App: React.FC = () => {
                  avatarUrl: userObj?.username ? `https://t.me/i/userpic/320/${userObj.username}.jpg` : undefined
              };
              setUser(newPlayer);
+             userIdRef.current = newPlayer.id; // Important for immediate socket auth
         }
     };
 
@@ -266,9 +277,10 @@ const App: React.FC = () => {
     const unsubState = SocketService.subscribe((newState) => {
         setGameState(newState);
 
-        // Update local player ref if changed (e.g. captain status)
-        if (user) {
-            const me = newState.players.find(p => p.id === user.id);
+        // Update local player ref using the ref to avoid stale closure
+        const currentUserId = userIdRef.current;
+        if (currentUserId) {
+            const me = newState.players.find(p => p.id === currentUserId);
             if (me) {
                 setUser(prev => prev ? ({ ...prev, ...me }) : me);
             }
@@ -290,16 +302,39 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // 2. Connection Monitor Effect (Separate to avoid re-initializing app)
+  useEffect(() => {
+    const checkConnection = setInterval(() => {
+        const connected = SocketService.isConnected();
+        if (connected !== isSocketConnected) {
+            setIsSocketConnected(connected);
+        }
+    }, 1000);
+
+    return () => {
+        clearInterval(checkConnection);
+    };
+  }, [isSocketConnected]);
+
   // Auto-Join Effect
   useEffect(() => {
-      if (autoJoinCode && user && !gameState.lobbyCode && !loading) {
-          // Prevent double-join attempts
-          if (gameState.status === GameStatus.HOME) {
-              handleJoinLobby(autoJoinCode);
-              setAutoJoinCode(null); // Clear code after attempt
+      // Logic: If we have a code, a user, and NOT in a lobby...
+      if (autoJoinCode && user && !gameState.lobbyCode) {
+
+          if (isSocketConnected) {
+              if (!loading) { // Prevent spamming
+                  handleJoinLobby(autoJoinCode);
+                  // We do NOT clear autoJoinCode immediately here, wait for success or failure?
+                  // Actually, to prevent loop, we should clear it or set a flag "joining".
+                  // handleJoinLobby sets loading=true.
+                  setAutoJoinCode(null); // Clear to prevent retry loop if it fails logic
+              }
+          } else {
+              // Not connected yet. Show loading state?
+              setLoading(true); // Persist loading state
           }
       }
-  }, [autoJoinCode, user, gameState.lobbyCode, gameState.status]);
+  }, [autoJoinCode, user, gameState.lobbyCode, isSocketConnected, loading]);
 
   // Timer Effect
   useEffect(() => {
@@ -450,6 +485,8 @@ const App: React.FC = () => {
 
       setLoading(true);
       try {
+          // If socket not connected, wait for it?
+          // SocketService.createLobby handles connection internally
           await SocketService.createLobby(user, gameState.settings);
       } catch (e: any) {
           setToast({ msg: e.message || "Failed", type: 'error' });
@@ -463,6 +500,14 @@ const App: React.FC = () => {
           setShowSettingsModal(true);
           return;
       }
+
+      // Ensure socket is connected before trying to join
+      if (!SocketService.isConnected()) {
+          // Wait briefly? Or just try to connect?
+          // createLobby/joinLobby call connect() but it's async
+          // Let's rely on SocketService internal wait
+      }
+
       setLoading(true);
       try {
           const success = await SocketService.joinLobby(code, user);
@@ -618,6 +663,12 @@ const App: React.FC = () => {
               )}
 
               {toast && <Toast message={toast.msg} type={toast.type} />}
+
+              {/* Optional: Add a "Connecting..." indicator if needed */}
+              {loading && <div className="absolute inset-0 bg-black/80 z-50 flex flex-col items-center justify-center space-y-4 animate-fade-in backdrop-blur-sm">
+                   <div className="w-12 h-12 border-4 border-game-accent border-t-transparent rounded-full animate-spin"></div>
+                   <div className="text-game-accent font-mono text-sm tracking-widest animate-pulse">CONNECTING TO LOBBY...</div>
+              </div>}
           </div>
       );
   }
