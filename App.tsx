@@ -720,12 +720,21 @@ const App: React.FC = () => {
     const [textRevealed, setTextRevealed] = useState(false);
 
     useEffect(() => {
+        let timeout: NodeJS.Timeout;
         if (gameState.status === GameStatus.PLAYER_INPUT) {
             setScenarioRevealed(false);
             setActionInput('');
+            // Delay reveal slightly for effect (auto-triggers CSS transitions)
+            timeout = setTimeout(() => {
+                setScenarioRevealed(true);
+            }, 800);
         } else if (gameState.status === GameStatus.RESULTS) {
             setTextRevealed(false);
+            timeout = setTimeout(() => {
+                setTextRevealed(true);
+            }, 800);
         }
+        return () => clearTimeout(timeout);
     }, [gameState.status]);
 
     const handleScenarioTap = () => {

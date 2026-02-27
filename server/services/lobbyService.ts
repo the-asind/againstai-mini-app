@@ -158,6 +158,9 @@ export class LobbyService {
             if (updates.keyCount !== undefined) {
                 player.keyCount = updates.keyCount;
             }
+            if ('loadingVote' in updates) {
+                player.loadingVote = updates.loadingVote;
+            }
             // Only allow updating self-identification fields if needed,
             // but mainly we track keyCount here from client reports.
             this.emitUpdate(code);
