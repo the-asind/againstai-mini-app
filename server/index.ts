@@ -23,25 +23,25 @@ app.use(express.static(path.join(process.cwd(), 'public')));
 
 // Handle Single Page Application routing (serve index.html for all non-API routes)
 app.get(/(.*)/, (req, res) => {
-  res.sendFile(path.join(process.cwd(), 'public', 'index.html'));
+    res.sendFile(path.join(process.cwd(), 'public', 'index.html'));
 });
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
 });
 
 const lobbyService = new LobbyService(io);
 
 // Extend Socket type
 declare module 'socket.io' {
-  interface Socket {
-    telegramUser?: TelegramUser;
-    lastNavyCheck?: number; // Rate limiting timestamp
-  }
+    interface Socket {
+        telegramUser?: TelegramUser;
+        lastNavyCheck?: number; // Rate limiting timestamp
+    }
 }
 
 // Start Image Cleanup Task (run every 1 hour)
@@ -50,154 +50,155 @@ setInterval(cleanupOldFiles, 60 * 60 * 1000);
 
 // Middleware: Strict Authentication
 io.use((socket, next) => {
-  const initData = socket.handshake.auth.initData;
+    const initData = socket.handshake.auth.initData;
 
-  // Development Bypass (Optional, remove for prod, but useful here if CONFIG.BOT_TOKEN is missing)
-  if (!CONFIG.BOT_TOKEN && process.env.NODE_ENV !== 'production') {
-      console.warn("DEV MODE: Skipping Auth Check due to missing token.");
-      socket.telegramUser = { id: 12345, first_name: "Dev", username: "dev" };
-      return next();
-  }
+    // Development Bypass (Optional, remove for prod, but useful here if CONFIG.BOT_TOKEN is missing)
+    if (!CONFIG.BOT_TOKEN && process.env.NODE_ENV !== 'production') {
+        console.warn("DEV MODE: Skipping Auth Check due to missing token.");
+        socket.telegramUser = { id: 12345, first_name: "Dev", username: "dev" };
+        return next();
+    }
 
-  if (!initData) {
-      return next(new Error("Authentication failed: No initData provided"));
-  }
+    if (!initData) {
+        return next(new Error("Authentication failed: No initData provided"));
+    }
 
-  const { isValid, user, error } = validateTelegramData(initData);
+    const { isValid, user, error } = validateTelegramData(initData);
 
-  if (!isValid || !user) {
-      console.error(`Auth Failed: ${error}`);
-      return next(new Error("Authentication failed: Invalid Telegram Data"));
-  }
+    if (!isValid || !user) {
+        console.error(`Auth Failed: ${error}`);
+        return next(new Error("Authentication failed: Invalid Telegram Data"));
+    }
 
-  socket.telegramUser = user;
-  next();
+    socket.telegramUser = user;
+    next();
 });
 
 io.on('connection', (socket) => {
-  const user = socket.telegramUser!;
-  // console.log(`User connected: ${user.id} (${user.first_name})`);
+    const user = socket.telegramUser!;
+    // console.log(`User connected: ${user.id} (${user.first_name})`);
 
-  socket.on('validate_api_key', async ({ apiKey }: { apiKey: string }, callback) => {
-      // We can use a service or just call the Gemini service directly
-      const isValid = await GeminiService.validateKey(apiKey);
-      if (callback) callback({ isValid });
-  });
+    socket.on('validate_api_key', async ({ apiKey }: { apiKey: string }, callback) => {
+        // We can use a service or just call the Gemini service directly
+        const isValid = await GeminiService.validateKey(apiKey);
+        if (callback) callback({ isValid });
+    });
 
-  socket.on('validate_navy_key', async ({ apiKey, code }: { apiKey: string, code?: string }, callback) => {
-      if (!callback) return;
+    socket.on('validate_navy_key', async ({ apiKey, code }: { apiKey: string, code?: string }, callback) => {
+        if (!callback) return;
 
-      // Input Validation
-      if (!apiKey || typeof apiKey !== 'string' || apiKey.trim() === '') {
-          return callback({ usage: null, error: "Invalid API Key format" });
-      }
+        // Input Validation
+        if (!apiKey || typeof apiKey !== 'string' || apiKey.trim() === '') {
+            return callback({ usage: null, error: "Invalid API Key format" });
+        }
 
-      // Rate Limiting (Simple Token Bucket / Timestamp)
-      const now = Date.now();
-      const lastCheck = socket.lastNavyCheck || 0;
-      if (now - lastCheck < 2000) { // Limit to 1 request every 2 seconds per socket
-          return callback({ usage: null, error: "Rate limit exceeded. Please wait." });
-      }
-      socket.lastNavyCheck = now;
+        // Rate Limiting (Simple Token Bucket / Timestamp)
+        const now = Date.now();
+        const lastCheck = socket.lastNavyCheck || 0;
+        if (now - lastCheck < 2000) { // Limit to 1 request every 2 seconds per socket
+            return callback({ usage: null, error: "Rate limit exceeded. Please wait." });
+        }
+        socket.lastNavyCheck = now;
 
-      const usage = await NavyService.getUsage(apiKey);
+        const usage = await NavyService.getUsage(apiKey);
 
-      if (usage && code && lobbyService.isPlayerInLobby(code, user.id.toString())) {
-          lobbyService.updatePlayer(code, user.id.toString(), {
-              navyUsage: {
-                  tokens: usage.usage.tokens_remaining_today,
-                  plan: usage.plan
-              }
-          });
-      }
+        if (usage && code && lobbyService.isPlayerInLobby(code, user.id.toString())) {
+            lobbyService.updatePlayer(code, user.id.toString(), {
+                navyUsage: {
+                    tokens: usage.usage.tokens_remaining_today,
+                    plan: usage.plan
+                }
+            });
+        }
 
-      callback({ usage });
-  });
+        callback({ usage });
+    });
 
-  socket.on('create_lobby', ({ player, settings }: { player: Player, settings: LobbySettings }, callback) => {
-    // Security Check: Ensure the player object ID matches the authenticated user ID
-    if (player.id !== user.id.toString()) {
-        if (callback) callback({ error: "Identity mismatch" });
-        return;
-    }
+    socket.on('create_lobby', ({ player, settings }: { player: Player, settings: LobbySettings }, callback) => {
+        // Security Check: Ensure the player object ID matches the authenticated user ID
+        if (player.id !== user.id.toString()) {
+            if (callback) callback({ error: "Identity mismatch" });
+            return;
+        }
 
-    try {
-        const code = lobbyService.createLobby(player, settings, socket.id);
-        socket.join(code);
-        lobbyService.emitUpdate(code);
-        if (callback) callback({ code });
-    } catch (e) {
-        if (callback) callback({ error: "Failed to create lobby" });
-    }
-  });
+        try {
+            const code = lobbyService.createLobby(player, settings, socket.id);
+            socket.join(code);
+            lobbyService.emitUpdate(code);
+            if (callback) callback({ code });
+        } catch (e) {
+            if (callback) callback({ error: "Failed to create lobby" });
+        }
+    });
 
-  socket.on('join_lobby', ({ code, player }: { code: string, player: Player }, callback) => {
-    if (player.id !== user.id.toString()) {
-        if (callback) callback({ error: "Identity mismatch" });
-        return;
-    }
+    socket.on('join_lobby', ({ code, player }: { code: string, player: Player }, callback) => {
+        if (player.id !== user.id.toString()) {
+            if (callback) callback({ error: "Identity mismatch" });
+            return;
+        }
 
-    const success = lobbyService.joinLobby(code, player, socket.id);
-    if (success) {
-        socket.join(code);
-        if (callback) callback({ success: true });
-    } else {
-        if (callback) callback({ error: "Lobby not found or locked" });
-    }
-  });
+        const success = lobbyService.joinLobby(code, player, socket.id);
+        if (success) {
+            socket.join(code);
+            lobbyService.emitUpdate(code); // Emit update AFTER player has joined the socket room
+            if (callback) callback({ success: true });
+        } else {
+            if (callback) callback({ error: "Lobby not found or locked" });
+        }
+    });
 
-  socket.on('update_settings', ({ code, settings }: { code: string, settings: Partial<LobbySettings> }) => {
-     if (lobbyService.isCaptain(code, user.id.toString())) {
-         lobbyService.updateSettings(code, user.id.toString(), settings);
-     }
-  });
+    socket.on('update_settings', ({ code, settings }: { code: string, settings: Partial<LobbySettings> }) => {
+        if (lobbyService.isCaptain(code, user.id.toString())) {
+            lobbyService.updateSettings(code, user.id.toString(), settings);
+        }
+    });
 
-  socket.on('update_player', ({ code, updates }: { code: string, updates: Partial<Player> }) => {
-      // Any player can update their OWN data
-      lobbyService.updatePlayer(code, user.id.toString(), updates);
-  });
+    socket.on('update_player', ({ code, updates }: { code: string, updates: Partial<Player> }) => {
+        // Any player can update their OWN data
+        lobbyService.updatePlayer(code, user.id.toString(), updates);
+    });
 
-  // Handle client responding to 'request_keys' event
-  socket.on('provide_keys', ({ code, keys }: { code: string, keys: { gemini?: string, navy?: string } }) => {
-      // Security Check: Ensure user is actually in the lobby
-      if (lobbyService.isPlayerInLobby(code, user.id.toString())) {
-          lobbyService.receiveKeys(code, user.id.toString(), keys);
-      }
-  });
+    // Handle client responding to 'request_keys' event
+    socket.on('provide_keys', ({ code, keys }: { code: string, keys: { gemini?: string, navy?: string } }) => {
+        // Security Check: Ensure user is actually in the lobby
+        if (lobbyService.isPlayerInLobby(code, user.id.toString())) {
+            lobbyService.receiveKeys(code, user.id.toString(), keys);
+        }
+    });
 
-  socket.on('get_aggregate_navy_usage', ({ code }: { code: string }) => {
-      if (lobbyService.isCaptain(code, user.id.toString())) {
-          lobbyService.getAggregateNavyUsage(code, user.id.toString());
-      }
-  });
+    socket.on('get_aggregate_navy_usage', ({ code }: { code: string }) => {
+        if (lobbyService.isCaptain(code, user.id.toString())) {
+            lobbyService.getAggregateNavyUsage(code, user.id.toString());
+        }
+    });
 
-  socket.on('start_game', ({ code }: { code: string }) => {
-      if (lobbyService.isCaptain(code, user.id.toString())) {
-          lobbyService.startGame(code, user.id.toString());
-      }
-  });
+    socket.on('start_game', ({ code }: { code: string }) => {
+        if (lobbyService.isCaptain(code, user.id.toString())) {
+            lobbyService.startGame(code, user.id.toString());
+        }
+    });
 
-  socket.on('submit_action', ({ code, action }: { code: string, action: string }) => {
-      lobbyService.submitAction(code, user.id.toString(), action);
-  });
+    socket.on('submit_action', ({ code, action }: { code: string, action: string }) => {
+        lobbyService.submitAction(code, user.id.toString(), action);
+    });
 
-  socket.on('reveal_results', ({ code }: { code: string }) => {
-      if (lobbyService.isCaptain(code, user.id.toString())) {
-          lobbyService.revealResults(code, user.id.toString());
-      }
-  });
+    socket.on('reveal_results', ({ code }: { code: string }) => {
+        if (lobbyService.isCaptain(code, user.id.toString())) {
+            lobbyService.revealResults(code, user.id.toString());
+        }
+    });
 
-  socket.on('reset_game', ({ code }: { code: string }) => {
-      if (lobbyService.isCaptain(code, user.id.toString())) {
-          lobbyService.resetGame(code, user.id.toString());
-      }
-  });
+    socket.on('reset_game', ({ code }: { code: string }) => {
+        if (lobbyService.isCaptain(code, user.id.toString())) {
+            lobbyService.resetGame(code, user.id.toString());
+        }
+    });
 
-  socket.on('disconnect', () => {
-    lobbyService.handleDisconnect(user.id.toString(), socket.id);
-  });
+    socket.on('disconnect', () => {
+        lobbyService.handleDisconnect(user.id.toString(), socket.id);
+    });
 });
 
 httpServer.listen(CONFIG.PORT, () => {
-  console.log(`Server running on port ${CONFIG.PORT}`);
+    console.log(`Server running on port ${CONFIG.PORT}`);
 });

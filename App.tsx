@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel, ImageGenerationMode, NavyUsageResponse } from './types';
+import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel, ImageGenerationMode, NavyUsageResponse, LoadingPhase, WheelConfig, VotingConfig, VotingResults, RoundType } from './types';
 import { translations, t } from './i18n';
 import { DEFAULT_SETTINGS, MIN_TIME, MAX_TIME, MIN_CHARS, MAX_CHARS, STORAGE_KEYS } from './constants';
 import { SocketService } from './services/socketService';
@@ -9,6 +9,8 @@ import { CodeInput } from './components/CodeInput';
 import { MarkdownDisplay } from './components/MarkdownDisplay';
 import { Toast } from './components/Toast';
 import { LobbyView } from './components/LobbyView';
+import { InteractiveLoadingScreen } from './components/InteractiveLoadingScreen';
+import { WHO_IS_MOST_LIKELY_QUESTIONS_RU, WHO_IS_MOST_LIKELY_QUESTIONS_EN } from './server/poll';
 import { SecretModal } from './components/SecretModal';
 import { ShieldAlert } from 'lucide-react';
 
@@ -216,13 +218,23 @@ const App: React.FC = () => {
     // Secret Data State
     const [secretData, setSecretData] = useState<string | null>(null);
     const [secretViewed, setSecretViewed] = useState(false);
-    const [isSecretModalOpen, setIsSecretModalOpen] = useState(false); // NEW STATE
+    const [isSecretModalOpen, setIsSecretModalOpen] = useState(false);
 
     // Refs needed for intervals and scrolling
     const timeLeftRef = useRef<number>(0);
     const [timeLeftDisplay, setTimeLeftDisplay] = useState(0);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const actionInputRef = useRef(''); // Ref for current input to avoid stale closures
+
+    // --- Loading Screen State (SCENARIO_GENERATION) ---
+    const [loadingPhase, setLoadingPhase] = useState<LoadingPhase>('WHEEL');
+    const [loadingText, setLoadingText] = useState('');
+    const [wheelConfig, setWheelConfig] = useState<WheelConfig | undefined>();
+    const [votingConfig, setVotingConfig] = useState<VotingConfig | undefined>();
+    const [votingResults, setVotingResults] = useState<VotingResults | undefined>();
+
+    // Timer for the loading screen voting phase
+    const votingTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
     // -- Effects --
 
@@ -262,21 +274,19 @@ const App: React.FC = () => {
             const savedNavyKey = localStorage.getItem(STORAGE_KEYS.NAVY_KEY);
             if (savedNavyKey) setSettingsNavyApiKey(savedNavyKey);
 
-            // Auto-create player object if we have saved data
-            if (savedNick) {
-                const userObj = window.Telegram?.WebApp?.initDataUnsafe?.user;
-                const newPlayer: Player = {
-                    id: userObj?.id?.toString() || Math.random().toString(36).substr(2, 9), // Fallback ID
-                    name: savedNick,
-                    isCaptain: false, // Will be set by server on create
-                    status: 'waiting',
-                    isOnline: true,
-                    keyCount: getKeyCount(),
-                    avatarUrl: userObj?.username ? `https://t.me/i/userpic/320/${userObj.username}.jpg` : undefined
-                };
-                setUser(newPlayer);
-                userIdRef.current = newPlayer.id; // Important for immediate socket auth
-            }
+            // Auto-create player object from Telegram Data or Mock
+            const userObj = window.Telegram?.WebApp?.initDataUnsafe?.user;
+            const newPlayer: Player = {
+                id: userObj?.id?.toString() || Math.random().toString(36).substr(2, 9), // Fallback ID
+                name: savedNick || userObj?.first_name || "Player_" + Math.floor(Math.random() * 1000),
+                isCaptain: false, // Will be set by server on create
+                status: 'waiting',
+                isOnline: true,
+                keyCount: getKeyCount(),
+                avatarUrl: userObj?.username ? `https://t.me/i/userpic/320/${userObj.username}.jpg` : undefined
+            };
+            setUser(newPlayer);
+            userIdRef.current = newPlayer.id; // Important for immediate socket auth
         };
 
         // Socket Subscriptions
@@ -340,16 +350,13 @@ const App: React.FC = () => {
         if (autoJoinCode && user && !gameState.lobbyCode) {
 
             if (isSocketConnected) {
-                if (!loading) { // Prevent spamming
-                    handleJoinLobby(autoJoinCode);
-                    // We do NOT clear autoJoinCode immediately here, wait for success or failure?
-                    // Actually, to prevent loop, we should clear it or set a flag "joining".
-                    // handleJoinLobby sets loading=true.
-                    setAutoJoinCode(null); // Clear to prevent retry loop if it fails logic
-                }
+                // Clear the code first to prevent any potential retry loop if handleJoinLobby fails
+                const codeToJoin = autoJoinCode;
+                setAutoJoinCode(null);
+                handleJoinLobby(codeToJoin);
             } else {
-                // Not connected yet. Show loading state?
-                setLoading(true); // Persist loading state
+                // Not connected yet. Show loading state.
+                if (!loading) setLoading(true); // Persist loading state until connected
             }
         }
     }, [autoJoinCode, user, gameState.lobbyCode, isSocketConnected, loading]);
@@ -382,6 +389,136 @@ const App: React.FC = () => {
             return () => clearTimeout(timer);
         }
     }, [toast]);
+
+    const voteRoundRef = useRef<number>(0);
+    const sequenceTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
+
+    const gameStateRef = useRef(gameState);
+    useEffect(() => {
+        gameStateRef.current = gameState;
+    }, [gameState]);
+
+    const endVotingPhase = useCallback((state: GameState) => {
+        clearInterval(votingTimerRef.current);
+
+        setLoadingPhase('VOTING_RESULTS');
+        setLoadingText(lang === 'ru' ? 'Подведение итогов...' : 'Finalizing calculations...');
+
+        // Compute Results Based on Real loadingVotes
+        const distribution: Record<string, number> = {};
+        state.players.forEach(p => {
+            if (p.loadingVote) {
+                distribution[p.loadingVote] = (distribution[p.loadingVote] || 0) + 1;
+            }
+        });
+
+        let winnerId = '';
+        let maxVotes = -1;
+        for (const [cId, count] of Object.entries(distribution)) {
+            if (count > maxVotes) {
+                winnerId = cId;
+                maxVotes = count;
+            }
+        }
+
+        // Fallback winner if nobody voted
+        if (winnerId === '' && state.players.length > 0) {
+            winnerId = state.players[0].id; // default to first
+        }
+
+        setVotingResults({ winnerId, votesDistribution: distribution });
+
+        // Wait 5s then restart voting
+        sequenceTimeoutRef.current = setTimeout(() => {
+            if (gameStateRef.current.status !== GameStatus.SCENARIO_GENERATION) return;
+            voteRoundRef.current++;
+            startVotingPhase();
+        }, 5000);
+    }, [lang]);
+
+    const startVotingPhase = useCallback(() => {
+        setLoadingPhase('VOTING');
+        setLoadingText(lang === 'ru' ? 'Сбор протоколов...' : 'Collecting protocols...');
+
+        const state = gameStateRef.current;
+        // Determine Question Deterministically
+        const questions = lang === 'ru' ? WHO_IS_MOST_LIKELY_QUESTIONS_RU : WHO_IS_MOST_LIKELY_QUESTIONS_EN;
+        const seed = Array.from(state.lobbyCode || "").reduce((a, b) => a + b.charCodeAt(0), 0) + voteRoundRef.current;
+        const randomQuestion = questions[seed % questions.length];
+
+        // Clear local vote first
+        if (state.lobbyCode) {
+            SocketService.updatePlayer(state.lobbyCode, { loadingVote: undefined });
+        }
+
+        setVotingConfig({
+            question: randomQuestion,
+            candidates: state.players,
+            myVoteId: null,
+            timeLeft: 15
+        });
+
+        clearInterval(votingTimerRef.current);
+        votingTimerRef.current = setInterval(() => {
+            setVotingConfig(prev => {
+                if (!prev) return prev;
+                // Since this runs every 1000ms, when it hits 1, we change to 0 and end phase next tick or now
+                if (prev.timeLeft <= 1) {
+                    clearInterval(votingTimerRef.current);
+                    endVotingPhase(gameStateRef.current);
+                    return prev;
+                }
+                return { ...prev, timeLeft: prev.timeLeft - 1 };
+            });
+        }, 1000);
+    }, [lang, endVotingPhase]);
+
+    // Handle Wheel Spin Complete
+    const handleWheelSpinComplete = useCallback(() => {
+        setLoadingPhase('SHOW_RESULT');
+        setLoadingText(lang === 'ru' ? 'Генерация окружения...' : 'Generating environment...');
+
+        sequenceTimeoutRef.current = setTimeout(() => {
+            if (gameStateRef.current.status === GameStatus.SCENARIO_GENERATION) {
+                startVotingPhase();
+            }
+        }, 3000);
+    }, [lang, startVotingPhase]);
+
+    // Loading Screen Orchestration initiation and cleanup
+    useEffect(() => {
+        if (gameState.status !== GameStatus.SCENARIO_GENERATION) {
+            clearTimeout(sequenceTimeoutRef.current);
+            clearInterval(votingTimerRef.current);
+            return;
+        }
+
+        // Only logic to start WHEEL if it's new
+        if (loadingPhase === 'WHEEL' && !wheelConfig) {
+            setLoadingText(lang === 'ru' ? 'Выбор сценария...' : 'Selecting scenario...');
+            // TODO: Fetch real wheel config from server
+            const seed = Array.from(gameState.lobbyCode || "").reduce((a, b) => a + b.charCodeAt(0), 0);
+            setWheelConfig({
+                segments: [
+                    { type: 'NORMAL', label: lang === 'ru' ? 'Обычный' : 'Normal', color: '#2EA05E', probability: 0.7 },
+                    { type: 'SPECIAL', label: lang === 'ru' ? 'Специальный' : 'Special', color: '#A02E8A', probability: 0.2 },
+                    { type: 'BOSS_FIGHT', label: lang === 'ru' ? 'БОСС' : 'BOSS', color: '#A02E2E', probability: 0.1 }
+                ],
+                targetIndex: seed % 3 // pseudo deterministic until server is attached
+            });
+            // The wheel component will take care of the animation duration, then call handleWheelSpinComplete locally inside App.tsx render via prop
+        }
+    }, [gameState.status, loadingPhase, wheelConfig, lang, gameState.lobbyCode]);
+
+    // Fast-forward effect if everyone has voted
+    useEffect(() => {
+        if (gameState.status === GameStatus.SCENARIO_GENERATION && loadingPhase === 'VOTING' && gameState.players.length > 0) {
+            const activePlayers = gameState.players;
+            if (activePlayers.length > 0 && activePlayers.every(p => p.loadingVote)) {
+                endVotingPhase(gameState);
+            }
+        }
+    }, [gameState, loadingPhase, endVotingPhase]);
 
     // Reset Secret Data on Round End
     useEffect(() => {
@@ -614,12 +751,21 @@ const App: React.FC = () => {
     const [textRevealed, setTextRevealed] = useState(false);
 
     useEffect(() => {
+        let timeout: NodeJS.Timeout;
         if (gameState.status === GameStatus.PLAYER_INPUT) {
             setScenarioRevealed(false);
             setActionInput('');
+            // Delay reveal slightly for effect (auto-triggers CSS transitions)
+            timeout = setTimeout(() => {
+                setScenarioRevealed(true);
+            }, 800);
         } else if (gameState.status === GameStatus.RESULTS) {
             setTextRevealed(false);
+            timeout = setTimeout(() => {
+                setTextRevealed(true);
+            }, 800);
         }
+        return () => clearTimeout(timeout);
     }, [gameState.status]);
 
     const handleScenarioTap = () => {
@@ -634,6 +780,13 @@ const App: React.FC = () => {
             window.Telegram?.WebApp?.HapticFeedback.impactOccurred('medium');
             setTextRevealed(true);
         }
+    };
+
+    const handleInteractiveLoadingScreenVote = (candidateId: string) => {
+        if (!gameState.lobbyCode) return;
+        SocketService.updatePlayer(gameState.lobbyCode, { loadingVote: candidateId });
+        setVotingConfig(prev => prev ? { ...prev, myVoteId: candidateId } : undefined);
+        window.Telegram?.WebApp?.HapticFeedback.impactOccurred('light');
     };
 
     const handleSecretViewed = () => {
@@ -685,7 +838,10 @@ const App: React.FC = () => {
                         </div>
                     </div>
 
-                    <CodeInput onComplete={handleJoinLobby} />
+                    <div className="space-y-2">
+                        <label className="text-xs text-tg-hint uppercase font-bold text-center block">{t('enterCode', lang)}</label>
+                        <CodeInput onComplete={handleJoinLobby} />
+                    </div>
                 </div>
 
                 {showSettingsModal && (
@@ -730,11 +886,16 @@ const App: React.FC = () => {
 
     if (gameState.status === GameStatus.SCENARIO_GENERATION) {
         return (
-            <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center space-y-6">
-                <div className="w-16 h-16 border-4 border-tg-button border-t-transparent rounded-full animate-spin"></div>
-                <h2 className="text-2xl font-bold animate-pulse">{t('generatingScenario', lang)}</h2>
-                <p className="text-tg-hint text-sm">{t('geminiThinking', lang)}</p>
-            </div>
+            <InteractiveLoadingScreen
+                phase={loadingPhase}
+                wheelConfig={wheelConfig}
+                votingConfig={votingConfig}
+                votingResults={votingResults}
+                loadingText={loadingText}
+                lang={lang}
+                onVote={handleInteractiveLoadingScreenVote}
+                onWheelSpinComplete={handleWheelSpinComplete}
+            />
         );
     }
 
@@ -813,8 +974,7 @@ const App: React.FC = () => {
                         </div>
                     </div>
                 )}
-
-                <div className={`mt-4 pb-4 transition-opacity duration-500 ${scenarioRevealed && (secretViewed || !secretData) ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                <div className={`mt-4 pb-4 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                     {user?.status === 'ready' ? (
                         <Button disabled className="bg-green-600 text-white">{t('actionSubmitted', lang)}</Button>
                     ) : (
