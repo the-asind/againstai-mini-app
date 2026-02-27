@@ -478,16 +478,7 @@ export class LobbyService {
         const player = lobby.players.find(p => p.id === playerId);
         if (!player) return;
 
-        // Check for injection/cheating ONLY if we have keys
-        if (lobby.geminiKeys.length > 0) {
-            // Use KeyManager for cheat check
-            const km = new KeyManager(lobby.geminiKeys[0], lobby.geminiKeys.slice(1));
-            const check = await GeminiService.checkInjection(km, action);
-            if (check.isCheat) {
-                // Currently logging only
-                console.log(`[Cheat] Player ${player.name} flagged: ${check.reason}`);
-            }
-        }
+        // CHEAT_DETECTOR is disabled: we no longer check for injection.
 
         player.actionText = action;
         player.status = 'ready';
@@ -684,6 +675,7 @@ export class LobbyService {
         lobby.players.forEach(p => {
             p.status = 'waiting';
             p.actionText = undefined;
+            p.loadingVote = null;
         });
 
         this.emitUpdate(code);

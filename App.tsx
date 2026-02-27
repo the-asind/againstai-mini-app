@@ -448,7 +448,7 @@ const App: React.FC = () => {
 
         // Clear local vote first
         if (state.lobbyCode) {
-            SocketService.updatePlayer(state.lobbyCode, { loadingVote: undefined });
+            SocketService.updatePlayer(state.lobbyCode, { loadingVote: null });
         }
 
         setVotingConfig({
