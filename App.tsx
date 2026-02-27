@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel, ImageGenerationMode, NavyUsageResponse } from './types';
+import { GameStatus, Player, GameMode, LobbySettings, GameState, RoundResult, Language, ScenarioType, AIModelLevel, ImageGenerationMode, NavyUsageResponse, LoadingPhase, WheelConfig, VotingConfig, VotingResults, RoundType } from './types';
 import { translations, t } from './i18n';
 import { DEFAULT_SETTINGS, MIN_TIME, MAX_TIME, MIN_CHARS, MAX_CHARS, STORAGE_KEYS } from './constants';
 import { SocketService } from './services/socketService';
@@ -9,6 +9,8 @@ import { CodeInput } from './components/CodeInput';
 import { MarkdownDisplay } from './components/MarkdownDisplay';
 import { Toast } from './components/Toast';
 import { LobbyView } from './components/LobbyView';
+import { InteractiveLoadingScreen } from './components/InteractiveLoadingScreen';
+import { WHO_IS_MOST_LIKELY_QUESTIONS_RU, WHO_IS_MOST_LIKELY_QUESTIONS_EN } from './server/poll';
 
 // Helper to count keys
 const getKeyCount = (): 0 | 1 | 2 => {
@@ -51,11 +53,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         }
 
         const timer = setTimeout(async () => {
-             // Pass undefined code to validate just the key (or current lobby if socket knows it)
-             const stats = await SocketService.validateNavyApiKey(settingsNavyApiKey);
-             if (!isCancelled) {
-                 setNavyStats(stats);
-             }
+            // Pass undefined code to validate just the key (or current lobby if socket knows it)
+            const stats = await SocketService.validateNavyApiKey(settingsNavyApiKey);
+            if (!isCancelled) {
+                setNavyStats(stats);
+            }
         }, 800);
 
         return () => {
@@ -69,785 +71,905 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     const imageCount = navyStats ? Math.floor(navyStats.usage.tokens_remaining_today / 7500) : 0;
 
     return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
-        <div className="bg-tg-secondaryBg w-full max-w-sm rounded-2xl p-6 border border-tg-hint/20 shadow-2xl space-y-4">
-            <h3 className="text-xl font-bold text-center">{t('settingsTitle', lang)}</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-tg-secondaryBg w-full max-w-sm rounded-2xl p-6 border border-tg-hint/20 shadow-2xl space-y-4">
+                <h3 className="text-xl font-bold text-center">{t('settingsTitle', lang)}</h3>
 
-            <div className="space-y-2">
-                <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('nickname', lang)}</label>
-                <Input
-                    value={settingsNick}
-                    onChange={(e) => setSettingsNick(e.target.value)}
-                    placeholder={t('enterNickname', lang)}
-                />
-            </div>
+                <div className="space-y-2">
+                    <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('nickname', lang)}</label>
+                    <Input
+                        value={settingsNick}
+                        onChange={(e) => setSettingsNick(e.target.value)}
+                        placeholder={t('enterNickname', lang)}
+                    />
+                </div>
 
-            <div className="space-y-2">
-                 <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('api_gemini_key_required', lang) || "Gemini API Key (Required)"}</label>
-                 <Input
-                    value={settingsApiKey}
-                    onChange={(e) => setSettingsApiKey(e.target.value)}
-                    placeholder="AI Studio Key"
-                    type="password"
-                    autoComplete="off"
-                 />
-                 <p className="text-[10px] text-tg-hint">
-                    {t('apiKeyHintPrefix', lang)} <a href="https://aistudio.google.com/api-keys" target="_blank" className="underline text-tg-link">{t('apiKeyLink', lang)}</a>.
-                 </p>
-            </div>
+                <div className="space-y-2">
+                    <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('api_gemini_key_required', lang) || "Gemini API Key (Required)"}</label>
+                    <Input
+                        value={settingsApiKey}
+                        onChange={(e) => setSettingsApiKey(e.target.value)}
+                        placeholder="AI Studio Key"
+                        type="password"
+                        autoComplete="off"
+                    />
+                    <p className="text-[10px] text-tg-hint">
+                        {t('apiKeyHintPrefix', lang)} <a href="https://aistudio.google.com/api-keys" target="_blank" className="underline text-tg-link">{t('apiKeyLink', lang)}</a>.
+                    </p>
+                </div>
 
-            <div className="space-y-2">
-                 <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('api_api_navy_key_optional', lang) || "API.NAVY Key (Optional)"}</label>
-                 <Input
-                    value={settingsNavyApiKey}
-                    onChange={(e) => setSettingsNavyApiKey(e.target.value)}
-                    placeholder="Navy Key"
-                    type="password"
-                    autoComplete="off"
-                 />
-                 <p className="text-[10px] text-tg-hint">
-                    {t('api_get_free_key_at', lang) || "Get free key at"} <a href="https://api.navy" target="_blank" className="underline text-tg-link">api.navy</a>.
-                 </p>
-                 {/* Navy Stats Display */}
-                 {navyStats && (
-                     <div className="bg-black/20 p-2 rounded text-[10px] space-y-1 border border-tg-hint/10">
-                         <div className="flex justify-between">
-                             <span className="text-tg-hint">Plan:</span>
-                             <span className="font-bold text-tg-text">{navyStats.plan}</span>
-                         </div>
-                         <div className="flex justify-between">
-                             <span className="text-tg-hint">Tokens:</span>
-                             <span className={`font-bold ${navyStats.usage.tokens_remaining_today < 10000 ? 'text-red-400' : 'text-green-400'}`}>
-                                 {(navyStats.usage.tokens_remaining_today / 1000).toFixed(1)}k
-                             </span>
-                         </div>
-                         <div className="border-t border-tg-hint/10 my-1"></div>
-                         <div className="flex justify-between">
-                             <span className="text-tg-hint">Est. Voices:</span>
-                             <span className="font-bold">{voiceCount}</span>
-                         </div>
-                         <div className="flex justify-between">
-                             <span className="text-tg-hint">Est. Images:</span>
-                             <span className="font-bold">{imageCount}</span>
-                         </div>
-                     </div>
-                 )}
-            </div>
+                <div className="space-y-2">
+                    <label className="text-xs text-tg-hint uppercase font-bold ml-1">{t('api_api_navy_key_optional', lang) || "API.NAVY Key (Optional)"}</label>
+                    <Input
+                        value={settingsNavyApiKey}
+                        onChange={(e) => setSettingsNavyApiKey(e.target.value)}
+                        placeholder="Navy Key"
+                        type="password"
+                        autoComplete="off"
+                    />
+                    <p className="text-[10px] text-tg-hint">
+                        {t('api_get_free_key_at', lang) || "Get free key at"} <a href="https://api.navy" target="_blank" className="underline text-tg-link">api.navy</a>.
+                    </p>
+                    {/* Navy Stats Display */}
+                    {navyStats && (
+                        <div className="bg-black/20 p-2 rounded text-[10px] space-y-1 border border-tg-hint/10">
+                            <div className="flex justify-between">
+                                <span className="text-tg-hint">Plan:</span>
+                                <span className="font-bold text-tg-text">{navyStats.plan}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-tg-hint">Tokens:</span>
+                                <span className={`font-bold ${navyStats.usage.tokens_remaining_today < 10000 ? 'text-red-400' : 'text-green-400'}`}>
+                                    {(navyStats.usage.tokens_remaining_today / 1000).toFixed(1)}k
+                                </span>
+                            </div>
+                            <div className="border-t border-tg-hint/10 my-1"></div>
+                            <div className="flex justify-between">
+                                <span className="text-tg-hint">Est. Voices:</span>
+                                <span className="font-bold">{voiceCount}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-tg-hint">Est. Images:</span>
+                                <span className="font-bold">{imageCount}</span>
+                            </div>
+                        </div>
+                    )}
+                </div>
 
-            <div className="flex gap-3 pt-2">
-                <Button variant="secondary" onClick={() => setShowSettingsModal(false)}>
-                    {t('cancel', lang)}
-                </Button>
-                <Button onClick={saveSettings}>
-                    {t('save', lang)}
-                </Button>
+                <div className="flex gap-3 pt-2">
+                    <Button variant="secondary" onClick={() => setShowSettingsModal(false)}>
+                        {t('cancel', lang)}
+                    </Button>
+                    <Button onClick={saveSettings}>
+                        {t('save', lang)}
+                    </Button>
+                </div>
             </div>
         </div>
-    </div>
     );
 };
 
 
 const App: React.FC = () => {
-  // -- Initialization & State --
-  
-  // 1. Load Language (Lazy Init)
-  const [lang, setLangState] = useState<'en' | 'ru'>(() =>
-      (localStorage.getItem(STORAGE_KEYS.LANG) as Language) || 'en'
-  );
+    // -- Initialization & State --
 
-  // Wrapper to save lang on change
-  const setLang = (l: Language) => {
-      setLangState(l);
-      localStorage.setItem(STORAGE_KEYS.LANG, l);
-  };
+    // 1. Load Language (Lazy Init)
+    const [lang, setLangState] = useState<'en' | 'ru'>(() =>
+        (localStorage.getItem(STORAGE_KEYS.LANG) as Language) || 'en'
+    );
 
-  const [user, setUser] = useState<Player | null>(null);
-  const userIdRef = useRef<string | null>(null); // Ref to track user ID for stale closures
+    // Wrapper to save lang on change
+    const setLang = (l: Language) => {
+        setLangState(l);
+        localStorage.setItem(STORAGE_KEYS.LANG, l);
+    };
 
-  // Sync ref with user state
-  useEffect(() => {
-      if (user?.id) {
-          userIdRef.current = user.id;
-      }
-  }, [user]);
-  
-  // 2. Load Settings (Lazy Init)
-  const [initialSettings] = useState<LobbySettings>(() => {
-      try {
-          const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
-          if (saved) {
-              return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
-          }
-      } catch (e) {
-          console.error("Failed to parse settings", e);
-      }
-      return DEFAULT_SETTINGS;
-  });
+    const [user, setUser] = useState<Player | null>(null);
+    const userIdRef = useRef<string | null>(null); // Ref to track user ID for stale closures
 
-  // Game State
-  const [gameState, setGameState] = useState<GameState>({
-    lobbyCode: null,
-    players: [],
-    status: GameStatus.HOME,
-    settings: initialSettings,
-    scenario: null,
-    resultsRevealed: false
-  });
+    // Sync ref with user state
+    useEffect(() => {
+        if (user?.id) {
+            userIdRef.current = user.id;
+        }
+    }, [user]);
 
-  // UI State
-  const [actionInput, setActionInput] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [autoJoinCode, setAutoJoinCode] = useState<string | null>(null);
-  const [isSocketConnected, setIsSocketConnected] = useState(false);
+    // 2. Load Settings (Lazy Init)
+    const [initialSettings] = useState<LobbySettings>(() => {
+        try {
+            const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+            if (saved) {
+                return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+            }
+        } catch (e) {
+            console.error("Failed to parse settings", e);
+        }
+        return DEFAULT_SETTINGS;
+    });
 
-  // Settings Modal State
-  const [settingsNick, setSettingsNick] = useState('');
-  const [settingsApiKey, setSettingsApiKey] = useState('');
-  const [settingsNavyApiKey, setSettingsNavyApiKey] = useState('');
-  
-  // Toast State
-  const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
+    // Game State
+    const [gameState, setGameState] = useState<GameState>({
+        lobbyCode: null,
+        players: [],
+        status: GameStatus.HOME,
+        settings: initialSettings,
+        scenario: null,
+        resultsRevealed: false
+    });
 
-  // Refs needed for intervals and scrolling
-  const timeLeftRef = useRef<number>(0);
-  const [timeLeftDisplay, setTimeLeftDisplay] = useState(0);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const actionInputRef = useRef(''); // Ref for current input to avoid stale closures
+    // UI State
+    const [actionInput, setActionInput] = useState('');
+    const [errorMsg, setErrorMsg] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [showSettingsModal, setShowSettingsModal] = useState(false);
+    const [autoJoinCode, setAutoJoinCode] = useState<string | null>(null);
+    const [isSocketConnected, setIsSocketConnected] = useState(false);
 
-  // -- Effects --
+    // Settings Modal State
+    const [settingsNick, setSettingsNick] = useState('');
+    const [settingsApiKey, setSettingsApiKey] = useState('');
+    const [settingsNavyApiKey, setSettingsNavyApiKey] = useState('');
 
-  // 1. Initial Setup Effect (Run Once)
-  useEffect(() => {
-    const initApp = async () => {
-        // Init Telegram WebApp
-        let startParam = null;
-        const tg = window.Telegram?.WebApp;
-        if (tg) {
-            tg.ready();
-            tg.expand();
+    // Toast State
+    const [toast, setToast] = useState<{ msg: string, type: 'success' | 'error' } | null>(null);
 
-            // Theme Params
-            document.documentElement.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#1f2937'); // Fallback gray-800
-            document.documentElement.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#ffffff');
-            document.documentElement.style.setProperty('--tg-theme-hint-color', tg.themeParams.hint_color || '#9ca3af');
-            document.documentElement.style.setProperty('--tg-theme-link-color', tg.themeParams.link_color || '#3b82f6');
-            document.documentElement.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#3b82f6');
-            document.documentElement.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff');
-            document.documentElement.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#374151'); // Fallback gray-700
-            
-            // Capture start param (invite code)
-            if (tg.initDataUnsafe?.start_param) {
-                startParam = tg.initDataUnsafe.start_param;
-                setAutoJoinCode(startParam);
+    // Refs needed for intervals and scrolling
+    const timeLeftRef = useRef<number>(0);
+    const [timeLeftDisplay, setTimeLeftDisplay] = useState(0);
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const actionInputRef = useRef(''); // Ref for current input to avoid stale closures
+
+    // --- Loading Screen State (SCENARIO_GENERATION) ---
+    const [loadingPhase, setLoadingPhase] = useState<LoadingPhase>('WHEEL');
+    const [loadingText, setLoadingText] = useState('');
+    const [wheelConfig, setWheelConfig] = useState<WheelConfig | undefined>();
+    const [votingConfig, setVotingConfig] = useState<VotingConfig | undefined>();
+    const [votingResults, setVotingResults] = useState<VotingResults | undefined>();
+
+    // Timer for the loading screen voting phase
+    const votingTimerRef = useRef<NodeJS.Timeout>();
+
+    // -- Effects --
+
+    // 1. Initial Setup Effect (Run Once)
+    useEffect(() => {
+        const initApp = async () => {
+            // Init Telegram WebApp
+            let startParam = null;
+            const tg = window.Telegram?.WebApp;
+            if (tg) {
+                tg.ready();
+                tg.expand();
+
+                // Theme Params
+                document.documentElement.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#1f2937'); // Fallback gray-800
+                document.documentElement.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#ffffff');
+                document.documentElement.style.setProperty('--tg-theme-hint-color', tg.themeParams.hint_color || '#9ca3af');
+                document.documentElement.style.setProperty('--tg-theme-link-color', tg.themeParams.link_color || '#3b82f6');
+                document.documentElement.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#3b82f6');
+                document.documentElement.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff');
+                document.documentElement.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#374151'); // Fallback gray-700
+
+                // Capture start param (invite code)
+                if (tg.initDataUnsafe?.start_param) {
+                    startParam = tg.initDataUnsafe.start_param;
+                    setAutoJoinCode(startParam);
+                }
+            }
+
+            // Load saved nickname/keys for modal
+            const savedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME);
+            if (savedNick) setSettingsNick(savedNick);
+
+            const savedKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
+            if (savedKey) setSettingsApiKey(savedKey);
+
+            const savedNavyKey = localStorage.getItem(STORAGE_KEYS.NAVY_KEY);
+            if (savedNavyKey) setSettingsNavyApiKey(savedNavyKey);
+
+            // Auto-create player object if we have saved data
+            if (savedNick) {
+                const userObj = window.Telegram?.WebApp?.initDataUnsafe?.user;
+                const newPlayer: Player = {
+                    id: userObj?.id?.toString() || Math.random().toString(36).substr(2, 9), // Fallback ID
+                    name: savedNick,
+                    isCaptain: false, // Will be set by server on create
+                    status: 'waiting',
+                    isOnline: true,
+                    keyCount: getKeyCount(),
+                    avatarUrl: userObj?.username ? `https://t.me/i/userpic/320/${userObj.username}.jpg` : undefined
+                };
+                setUser(newPlayer);
+                userIdRef.current = newPlayer.id; // Important for immediate socket auth
+            }
+        };
+
+        // Socket Subscriptions
+        // We subscribe BEFORE connecting to ensure we don't miss the initial game_state event
+        const unsubState = SocketService.subscribe((newState) => {
+            setGameState(newState);
+
+            // Update local player ref using the ref to avoid stale closure
+            const currentUserId = userIdRef.current;
+            if (currentUserId) {
+                const me = newState.players.find(p => p.id === currentUserId);
+                if (me) {
+                    setUser(prev => prev ? ({ ...prev, ...me }) : me);
+                }
+            }
+        });
+
+        const unsubError = SocketService.subscribeToErrors((err) => {
+            setToast({ msg: err.message, type: 'error' });
+        });
+
+        // Initialize and Connect
+        initApp().then(() => {
+            SocketService.connect();
+        });
+
+        return () => {
+            unsubState();
+            unsubError();
+        };
+    }, []);
+
+    // 2. Connection Monitor Effect (Separate to avoid re-initializing app)
+    useEffect(() => {
+        const checkConnection = setInterval(() => {
+            const connected = SocketService.isConnected();
+            if (connected !== isSocketConnected) {
+                setIsSocketConnected(connected);
+            }
+        }, 1000);
+
+        return () => {
+            clearInterval(checkConnection);
+        };
+    }, [isSocketConnected]);
+
+    // Auto-Join Effect
+    useEffect(() => {
+        // Logic: If we have a code, a user, and NOT in a lobby...
+        if (autoJoinCode && user && !gameState.lobbyCode) {
+
+            if (isSocketConnected) {
+                if (!loading) { // Prevent spamming
+                    handleJoinLobby(autoJoinCode);
+                    // We do NOT clear autoJoinCode immediately here, wait for success or failure?
+                    // Actually, to prevent loop, we should clear it or set a flag "joining".
+                    // handleJoinLobby sets loading=true.
+                    setAutoJoinCode(null); // Clear to prevent retry loop if it fails logic
+                }
+            } else {
+                // Not connected yet. Show loading state?
+                setLoading(true); // Persist loading state
             }
         }
+    }, [autoJoinCode, user, gameState.lobbyCode, isSocketConnected, loading]);
 
-        // Load saved nickname/keys for modal
-        const savedNick = localStorage.getItem(STORAGE_KEYS.NICKNAME);
-        if (savedNick) setSettingsNick(savedNick);
+    // Timer Effect
+    useEffect(() => {
+        let interval: NodeJS.Timeout;
+        if (gameState.status === GameStatus.PLAYER_INPUT) {
+            timeLeftRef.current = gameState.settings.timeLimitSeconds;
+            setTimeLeftDisplay(gameState.settings.timeLimitSeconds);
 
-        const savedKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
-        if (savedKey) setSettingsApiKey(savedKey);
+            interval = setInterval(() => {
+                timeLeftRef.current -= 1;
+                setTimeLeftDisplay(timeLeftRef.current);
+                if (timeLeftRef.current <= 0) {
+                    clearInterval(interval);
+                    // Auto-submit happens via server timeout usually, but we can force it too?
+                    // Let's rely on server for robust timeout handling, but client can submit partial.
+                    // Actually, server handles it.
+                }
+            }, 1000);
+        }
+        return () => clearInterval(interval);
+    }, [gameState.status, gameState.settings.timeLimitSeconds]);
 
-        const savedNavyKey = localStorage.getItem(STORAGE_KEYS.NAVY_KEY);
-        if (savedNavyKey) setSettingsNavyApiKey(savedNavyKey);
+    // Toast Auto-Hide
+    useEffect(() => {
+        if (toast) {
+            const timer = setTimeout(() => setToast(null), 3000);
+            return () => clearTimeout(timer);
+        }
+    }, [toast]);
 
-        // Auto-create player object if we have saved data
-        if (savedNick) {
-             const userObj = window.Telegram?.WebApp?.initDataUnsafe?.user;
-             const newPlayer: Player = {
-                 id: userObj?.id?.toString() || Math.random().toString(36).substr(2, 9), // Fallback ID
-                 name: savedNick,
-                 isCaptain: false, // Will be set by server on create
-                 status: 'waiting',
-                 isOnline: true,
-                 keyCount: getKeyCount(),
-                 avatarUrl: userObj?.username ? `https://t.me/i/userpic/320/${userObj.username}.jpg` : undefined
-             };
-             setUser(newPlayer);
-             userIdRef.current = newPlayer.id; // Important for immediate socket auth
+    // Loading Screen Orchestration
+    useEffect(() => {
+        if (gameState.status !== GameStatus.SCENARIO_GENERATION) {
+            if (votingTimerRef.current) clearInterval(votingTimerRef.current);
+            return;
+        }
+
+        let isMounted = true;
+        let sequenceTimeout: NodeJS.Timeout;
+
+        const runSequence = async () => {
+            // 1. WHEEL PHASE
+            setLoadingPhase('WHEEL');
+            setLoadingText(lang === 'ru' ? 'Выбор сценария...' : 'Selecting scenario...');
+
+            // TODO: Fetch real wheel config from server based on current possibilities
+            // This is a mocked wheel config
+            setWheelConfig({
+                segments: [
+                    { type: 'NORMAL', label: lang === 'ru' ? 'Обычный' : 'Normal', color: '#2EA05E', probability: 0.7 },
+                    { type: 'SPECIAL', label: lang === 'ru' ? 'Специальный' : 'Special', color: '#A02E8A', probability: 0.2 },
+                    { type: 'BOSS_FIGHT', label: lang === 'ru' ? 'БОСС' : 'BOSS', color: '#A02E2E', probability: 0.1 }
+                ],
+                targetIndex: 0 // Mocking choosing the Normal round
+            });
+
+            // Wait 1.5s then "spin" (the component handles its own spin animation timing, but we mock the phase change here)
+            // Actually, we'll wait 4s to simulate the entire wheel spin 
+            sequenceTimeout = setTimeout(() => {
+                if (!isMounted) return;
+
+                // 2. SHOW_RESULT PHASE
+                setLoadingPhase('SHOW_RESULT');
+                setLoadingText(lang === 'ru' ? 'Генерация окружения...' : 'Generating environment...');
+
+                // Wait 3s showing the result
+                sequenceTimeout = setTimeout(() => {
+                    if (!isMounted) return;
+
+                    // 3. VOTING PHASE
+                    setLoadingPhase('VOTING');
+                    setLoadingText(lang === 'ru' ? 'Сбор протоколов...' : 'Collecting protocols...');
+
+                    const questions = lang === 'ru' ? WHO_IS_MOST_LIKELY_QUESTIONS_RU : WHO_IS_MOST_LIKELY_QUESTIONS_EN;
+                    const randomQuestion = questions[Math.floor(Math.random() * questions.length)];
+
+                    setVotingConfig({
+                        question: randomQuestion,
+                        candidates: gameState.players,
+                        myVoteId: null,
+                        timeLeft: 15
+                    });
+
+                    // Start Voting Timer
+                    let timeLeft = 15;
+                    votingTimerRef.current = setInterval(() => {
+                        timeLeft -= 1;
+                        setVotingConfig(prev => prev ? { ...prev, timeLeft } : undefined);
+
+                        if (timeLeft <= 0) {
+                            clearInterval(votingTimerRef.current!);
+
+                            const candidates = gameState.players;
+                            if (candidates.length === 0) return;
+
+                            // Mock voting results
+                            // TODO: Integrate actual voting logic with the server
+                            const mockVotesDistribution: Record<string, number> = {};
+                            candidates.forEach(c => mockVotesDistribution[c.id] = Math.floor(Math.random() * 5));
+                            const winnerId = Object.keys(mockVotesDistribution).reduce((a, b) => mockVotesDistribution[a] > mockVotesDistribution[b] ? a : b);
+
+                            setVotingResults({
+                                winnerId: winnerId,
+                                votesDistribution: mockVotesDistribution
+                            });
+
+                            setLoadingPhase('VOTING_RESULTS');
+                            setLoadingText(lang === 'ru' ? 'Завершение расчетов...' : 'Finalizing calculations...');
+                        }
+                    }, 1000);
+
+                }, 3000);
+            }, 4000);
+        };
+
+        runSequence();
+
+        return () => {
+            isMounted = false;
+            clearTimeout(sequenceTimeout);
+            if (votingTimerRef.current) clearInterval(votingTimerRef.current);
+        };
+    }, [gameState.status, lang, gameState.players]);
+
+    // -- Handlers --
+
+    const handleSaveSettings = () => {
+        if (!settingsNick.trim()) {
+            setToast({ msg: t('nicknameRequired', lang), type: 'error' });
+            return;
+        }
+
+        localStorage.setItem(STORAGE_KEYS.NICKNAME, settingsNick);
+
+        if (settingsApiKey.trim()) {
+            localStorage.setItem(STORAGE_KEYS.API_KEY, settingsApiKey);
+        } else {
+            localStorage.removeItem(STORAGE_KEYS.API_KEY);
+        }
+
+        if (settingsNavyApiKey.trim()) {
+            localStorage.setItem(STORAGE_KEYS.NAVY_KEY, settingsNavyApiKey);
+            // Also validate immediately to update server?
+            SocketService.validateNavyApiKey(settingsNavyApiKey);
+        } else {
+            localStorage.removeItem(STORAGE_KEYS.NAVY_KEY);
+        }
+
+        // Update User Object
+        const userObj = window.Telegram?.WebApp?.initDataUnsafe?.user;
+        const updatedUser: Player = {
+            id: userObj?.id?.toString() || (user?.id || Math.random().toString(36).substr(2, 9)),
+            name: settingsNick,
+            isCaptain: user?.isCaptain || false,
+            status: user?.status || 'waiting',
+            isOnline: true,
+            keyCount: getKeyCount(),
+            avatarUrl: userObj?.username ? `https://t.me/i/userpic/320/${userObj.username}.jpg` : undefined
+        };
+
+        setUser(updatedUser);
+        setShowSettingsModal(false);
+
+        // If in lobby, broadcast update
+        if (gameState.lobbyCode) {
+            SocketService.updatePlayer(gameState.lobbyCode, {
+                name: settingsNick,
+                keyCount: getKeyCount()
+                // We don't send keys here, they are sent on demand
+            });
         }
     };
 
-    // Socket Subscriptions
-    // We subscribe BEFORE connecting to ensure we don't miss the initial game_state event
-    const unsubState = SocketService.subscribe((newState) => {
-        setGameState(newState);
+    // Handler for LobbyView's internal settings modal
+    const handleSaveSettingsFromLobby = (
+        newNick: string,
+        newApiKey: string,
+        newNavyKey: string,
+        newLang: Language
+    ): boolean => {
+        setLang(newLang);
 
-        // Update local player ref using the ref to avoid stale closure
-        const currentUserId = userIdRef.current;
-        if (currentUserId) {
-            const me = newState.players.find(p => p.id === currentUserId);
-            if (me) {
-                setUser(prev => prev ? ({ ...prev, ...me }) : me);
-            }
+        if (!newNick.trim()) {
+            setToast({ msg: t('nicknameRequired', newLang), type: 'error' });
+            return false;
         }
-    });
 
-    const unsubError = SocketService.subscribeToErrors((err) => {
-        setToast({ msg: err.message, type: 'error' });
-    });
+        setSettingsNick(newNick);
+        localStorage.setItem(STORAGE_KEYS.NICKNAME, newNick);
 
-    // Initialize and Connect
-    initApp().then(() => {
-        SocketService.connect();
-    });
-
-    return () => {
-        unsubState();
-        unsubError();
-    };
-  }, []);
-
-  // 2. Connection Monitor Effect (Separate to avoid re-initializing app)
-  useEffect(() => {
-    const checkConnection = setInterval(() => {
-        const connected = SocketService.isConnected();
-        if (connected !== isSocketConnected) {
-            setIsSocketConnected(connected);
+        if (newApiKey.trim()) {
+            setSettingsApiKey(newApiKey);
+            localStorage.setItem(STORAGE_KEYS.API_KEY, newApiKey);
+        } else {
+            setSettingsApiKey('');
+            localStorage.removeItem(STORAGE_KEYS.API_KEY);
         }
-    }, 1000);
 
-    return () => {
-        clearInterval(checkConnection);
+        if (newNavyKey.trim()) {
+            setSettingsNavyApiKey(newNavyKey);
+            localStorage.setItem(STORAGE_KEYS.NAVY_KEY, newNavyKey);
+            SocketService.validateNavyApiKey(newNavyKey);
+        } else {
+            setSettingsNavyApiKey('');
+            localStorage.removeItem(STORAGE_KEYS.NAVY_KEY);
+        }
+
+        const userObj = window.Telegram?.WebApp?.initDataUnsafe?.user;
+        const updatedUser: Player = {
+            id: userObj?.id?.toString() || (user?.id || Math.random().toString(36).substr(2, 9)),
+            name: newNick,
+            isCaptain: user?.isCaptain || false,
+            status: user?.status || 'waiting',
+            isOnline: true,
+            keyCount: getKeyCount(),
+            avatarUrl: userObj?.username ? `https://t.me/i/userpic/320/${userObj.username}.jpg` : undefined
+        };
+
+        setUser(updatedUser);
+
+        if (gameState.lobbyCode) {
+            SocketService.updatePlayer(gameState.lobbyCode, {
+                name: newNick,
+                keyCount: getKeyCount()
+            });
+        }
+        setToast({ msg: t('settingsSaved', newLang), type: 'success' });
+        return true;
     };
-  }, [isSocketConnected]);
 
-  // Auto-Join Effect
-  useEffect(() => {
-      // Logic: If we have a code, a user, and NOT in a lobby...
-      if (autoJoinCode && user && !gameState.lobbyCode) {
+    const handleCreateLobby = async () => {
+        if (!user) {
+            setShowSettingsModal(true);
+            return;
+        }
+        // Check API Key
+        if (!localStorage.getItem(STORAGE_KEYS.API_KEY)) {
+            setToast({ msg: t('missingApiKey', lang), type: 'error' });
+            setShowSettingsModal(true);
+            return;
+        }
 
-          if (isSocketConnected) {
-              if (!loading) { // Prevent spamming
-                  handleJoinLobby(autoJoinCode);
-                  // We do NOT clear autoJoinCode immediately here, wait for success or failure?
-                  // Actually, to prevent loop, we should clear it or set a flag "joining".
-                  // handleJoinLobby sets loading=true.
-                  setAutoJoinCode(null); // Clear to prevent retry loop if it fails logic
-              }
-          } else {
-              // Not connected yet. Show loading state?
-              setLoading(true); // Persist loading state
-          }
-      }
-  }, [autoJoinCode, user, gameState.lobbyCode, isSocketConnected, loading]);
+        setLoading(true);
+        try {
+            // If socket not connected, wait for it?
+            // SocketService.createLobby handles connection internally
+            await SocketService.createLobby(user, gameState.settings);
+        } catch (e: any) {
+            setToast({ msg: e.message || "Failed", type: 'error' });
+        } finally {
+            setLoading(false);
+        }
+    };
 
-  // Timer Effect
-  useEffect(() => {
-     let interval: NodeJS.Timeout;
-     if (gameState.status === GameStatus.PLAYER_INPUT) {
-         timeLeftRef.current = gameState.settings.timeLimitSeconds;
-         setTimeLeftDisplay(gameState.settings.timeLimitSeconds);
+    const handleJoinLobby = async (code: string) => {
+        if (!user) {
+            setShowSettingsModal(true);
+            return;
+        }
 
-         interval = setInterval(() => {
-             timeLeftRef.current -= 1;
-             setTimeLeftDisplay(timeLeftRef.current);
-             if (timeLeftRef.current <= 0) {
-                 clearInterval(interval);
-                 // Auto-submit happens via server timeout usually, but we can force it too?
-                 // Let's rely on server for robust timeout handling, but client can submit partial.
-                 // Actually, server handles it.
-             }
-         }, 1000);
-     }
-     return () => clearInterval(interval);
-  }, [gameState.status, gameState.settings.timeLimitSeconds]);
+        // Ensure socket is connected before trying to join
+        if (!SocketService.isConnected()) {
+            // Wait briefly? Or just try to connect?
+            // createLobby/joinLobby call connect() but it's async
+            // Let's rely on SocketService internal wait
+        }
 
-  // Toast Auto-Hide
-  useEffect(() => {
-      if (toast) {
-          const timer = setTimeout(() => setToast(null), 3000);
-          return () => clearTimeout(timer);
-      }
-  }, [toast]);
+        setLoading(true);
+        try {
+            const success = await SocketService.joinLobby(code, user);
+            if (!success) setToast({ msg: t('lobbyNotFound', lang), type: 'error' });
+        } catch (e: any) {
+            setToast({ msg: e.message || "Failed", type: 'error' });
+        } finally {
+            setLoading(false);
+        }
+    };
 
-  // -- Handlers --
+    const handleUpdateSettings = (key: keyof LobbySettings, value: any) => {
+        if (gameState.lobbyCode) {
+            SocketService.updateSettings(gameState.lobbyCode, { [key]: value });
+        } else {
+            // Update local initial settings
+            setGameState(prev => ({
+                ...prev,
+                settings: { ...prev.settings, [key]: value }
+            }));
+            // Save to local storage
+            const newSettings = { ...gameState.settings, [key]: value };
+            localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(newSettings));
+        }
+    };
 
-  const handleSaveSettings = () => {
-      if (!settingsNick.trim()) {
-          setToast({ msg: t('nicknameRequired', lang), type: 'error' });
-          return;
-      }
+    const handleStartGame = () => {
+        if (gameState.lobbyCode) {
+            SocketService.startGame(gameState.lobbyCode);
+        }
+    };
 
-      localStorage.setItem(STORAGE_KEYS.NICKNAME, settingsNick);
+    const handleActionInputChange = (val: string) => {
+        setActionInput(val);
+        actionInputRef.current = val;
+    };
 
-      if (settingsApiKey.trim()) {
-          localStorage.setItem(STORAGE_KEYS.API_KEY, settingsApiKey);
-      } else {
-          localStorage.removeItem(STORAGE_KEYS.API_KEY);
-      }
+    const handleSubmitAction = (force: boolean = false) => {
+        if (!gameState.lobbyCode) return;
 
-      if (settingsNavyApiKey.trim()) {
-          localStorage.setItem(STORAGE_KEYS.NAVY_KEY, settingsNavyApiKey);
-          // Also validate immediately to update server?
-          SocketService.validateNavyApiKey(settingsNavyApiKey);
-      } else {
-          localStorage.removeItem(STORAGE_KEYS.NAVY_KEY);
-      }
+        // Validation?
+        if (!force && actionInput.length < MIN_CHARS) {
+            setErrorMsg(`${t('chars', lang)}: ${actionInput.length}/${MIN_CHARS}`);
+            return;
+        }
 
-      // Update User Object
-      const userObj = window.Telegram?.WebApp?.initDataUnsafe?.user;
-      const updatedUser: Player = {
-          id: userObj?.id?.toString() || (user?.id || Math.random().toString(36).substr(2, 9)),
-          name: settingsNick,
-          isCaptain: user?.isCaptain || false,
-          status: user?.status || 'waiting',
-          isOnline: true,
-          keyCount: getKeyCount(),
-          avatarUrl: userObj?.username ? `https://t.me/i/userpic/320/${userObj.username}.jpg` : undefined
-      };
+        setLoading(true);
+        SocketService.submitAction(gameState.lobbyCode, actionInput);
+        setLoading(false);
+        setErrorMsg('');
+    };
 
-      setUser(updatedUser);
-      setShowSettingsModal(false);
+    const handleRevealResults = () => {
+        if (gameState.lobbyCode) {
+            SocketService.revealResults(gameState.lobbyCode);
+        }
+    };
 
-      // If in lobby, broadcast update
-      if (gameState.lobbyCode) {
-          SocketService.updatePlayer(gameState.lobbyCode, {
-              name: settingsNick,
-              keyCount: getKeyCount()
-              // We don't send keys here, they are sent on demand
-          });
-      }
-  };
+    const handleRestart = () => {
+        if (gameState.lobbyCode) {
+            SocketService.resetGame(gameState.lobbyCode);
+        }
+    };
 
-  // Handler for LobbyView's internal settings modal
-  const handleSaveSettingsFromLobby = (
-    newNick: string,
-    newApiKey: string,
-    newNavyKey: string,
-    newLang: Language
-  ): boolean => {
-      setLang(newLang);
+    const handleShare = () => {
+        const link = `https://t.me/AgainstAIBot?startapp=${gameState.lobbyCode}`;
+        navigator.clipboard.writeText(link);
+        setToast({ msg: t('linkCopied', lang), type: 'success' });
+    };
 
-      if (!newNick.trim()) {
-          setToast({ msg: t('nicknameRequired', newLang), type: 'error' });
-          return false;
-      }
+    // Interactions
+    const [scenarioRevealed, setScenarioRevealed] = useState(false);
+    const [textRevealed, setTextRevealed] = useState(false);
 
-      setSettingsNick(newNick);
-      localStorage.setItem(STORAGE_KEYS.NICKNAME, newNick);
+    useEffect(() => {
+        if (gameState.status === GameStatus.PLAYER_INPUT) {
+            setScenarioRevealed(false);
+            setActionInput('');
+        } else if (gameState.status === GameStatus.RESULTS) {
+            setTextRevealed(false);
+        }
+    }, [gameState.status]);
 
-      if (newApiKey.trim()) {
-          setSettingsApiKey(newApiKey);
-          localStorage.setItem(STORAGE_KEYS.API_KEY, newApiKey);
-      } else {
-          setSettingsApiKey('');
-          localStorage.removeItem(STORAGE_KEYS.API_KEY);
-      }
+    const handleScenarioTap = () => {
+        if (!scenarioRevealed) {
+            window.Telegram?.WebApp?.HapticFeedback.impactOccurred('medium');
+            setScenarioRevealed(true);
+        }
+    };
 
-      if (newNavyKey.trim()) {
-          setSettingsNavyApiKey(newNavyKey);
-          localStorage.setItem(STORAGE_KEYS.NAVY_KEY, newNavyKey);
-          SocketService.validateNavyApiKey(newNavyKey);
-      } else {
-          setSettingsNavyApiKey('');
-          localStorage.removeItem(STORAGE_KEYS.NAVY_KEY);
-      }
+    const handleResultsTap = () => {
+        if (!textRevealed) {
+            window.Telegram?.WebApp?.HapticFeedback.impactOccurred('medium');
+            setTextRevealed(true);
+        }
+    };
 
-      const userObj = window.Telegram?.WebApp?.initDataUnsafe?.user;
-      const updatedUser: Player = {
-          id: userObj?.id?.toString() || (user?.id || Math.random().toString(36).substr(2, 9)),
-          name: newNick,
-          isCaptain: user?.isCaptain || false,
-          status: user?.status || 'waiting',
-          isOnline: true,
-          keyCount: getKeyCount(),
-          avatarUrl: userObj?.username ? `https://t.me/i/userpic/320/${userObj.username}.jpg` : undefined
-      };
+    const handleInteractiveLoadingScreenVote = (candidateId: string) => {
+        // TODO: Send vote to server over socket here
+        setVotingConfig(prev => prev ? { ...prev, myVoteId: candidateId } : undefined);
+        window.Telegram?.WebApp?.HapticFeedback.impactOccurred('light');
+    };
 
-      setUser(updatedUser);
+    // -- Render Helpers --
 
-      if (gameState.lobbyCode) {
-          SocketService.updatePlayer(gameState.lobbyCode, {
-              name: newNick,
-              keyCount: getKeyCount()
-          });
-      }
-      setToast({ msg: t('settingsSaved', newLang), type: 'success' });
-      return true;
-  };
+    const displayedScenario = scenarioRevealed
+        ? (gameState.scenario || '')
+        : (gameState.scenario ? gameState.scenario.substring(0, 50) + '...' : '');
 
-  const handleCreateLobby = async () => {
-      if (!user) {
-          setShowSettingsModal(true);
-          return;
-      }
-      // Check API Key
-      if (!localStorage.getItem(STORAGE_KEYS.API_KEY)) {
-           setToast({ msg: t('missingApiKey', lang), type: 'error' });
-           setShowSettingsModal(true);
-           return;
-      }
+    const displayedText = textRevealed
+        ? (gameState.roundResult?.story || '')
+        : (gameState.roundResult?.story ? gameState.roundResult.story.substring(0, 50) + '...' : '');
 
-      setLoading(true);
-      try {
-          // If socket not connected, wait for it?
-          // SocketService.createLobby handles connection internally
-          await SocketService.createLobby(user, gameState.settings);
-      } catch (e: any) {
-          setToast({ msg: e.message || "Failed", type: 'error' });
-      } finally {
-          setLoading(false);
-      }
-  };
+    // -- Views --
 
-  const handleJoinLobby = async (code: string) => {
-      if (!user) {
-          setShowSettingsModal(true);
-          return;
-      }
+    if (gameState.status === GameStatus.HOME) {
+        return (
+            <div className="min-h-screen flex flex-col items-center justify-center p-6 space-y-8 animate-fade-in relative">
+                {/* Settings Button */}
+                <button
+                    onClick={() => setShowSettingsModal(true)}
+                    className="absolute top-4 right-4 p-2 text-tg-hint hover:text-tg-text transition-colors"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                </button>
 
-      // Ensure socket is connected before trying to join
-      if (!SocketService.isConnected()) {
-          // Wait briefly? Or just try to connect?
-          // createLobby/joinLobby call connect() but it's async
-          // Let's rely on SocketService internal wait
-      }
+                <h1 className="text-4xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-600 drop-shadow-sm">
+                    AGAINST AI
+                </h1>
 
-      setLoading(true);
-      try {
-          const success = await SocketService.joinLobby(code, user);
-          if (!success) setToast({ msg: t('lobbyNotFound', lang), type: 'error' });
-      } catch (e: any) {
-          setToast({ msg: e.message || "Failed", type: 'error' });
-      } finally {
-          setLoading(false);
-      }
-  };
+                <div className="w-full max-w-xs space-y-4">
+                    <Button onClick={handleCreateLobby} isLoading={loading}>
+                        {t('createLobby', lang)}
+                    </Button>
 
-  const handleUpdateSettings = (key: keyof LobbySettings, value: any) => {
-      if (gameState.lobbyCode) {
-          SocketService.updateSettings(gameState.lobbyCode, { [key]: value });
-      } else {
-          // Update local initial settings
-          setGameState(prev => ({
-              ...prev,
-              settings: { ...prev.settings, [key]: value }
-          }));
-          // Save to local storage
-          const newSettings = { ...gameState.settings, [key]: value };
-          localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(newSettings));
-      }
-  };
+                    <div className="relative">
+                        <div className="absolute inset-0 flex items-center">
+                            <span className="w-full border-t border-tg-hint/20"></span>
+                        </div>
+                        <div className="relative flex justify-center text-xs uppercase">
+                            <span className="bg-tg-bg px-2 text-tg-hint">{t('or', lang)}</span>
+                        </div>
+                    </div>
 
-  const handleStartGame = () => {
-      if (gameState.lobbyCode) {
-          SocketService.startGame(gameState.lobbyCode);
-      }
-  };
+                    <div className="space-y-2">
+                        <label className="text-xs text-tg-hint uppercase font-bold text-center block">{t('enterCode', lang)}</label>
+                        <CodeInput onComplete={handleJoinLobby} />
+                    </div>
+                </div>
 
-  const handleActionInputChange = (val: string) => {
-      setActionInput(val);
-      actionInputRef.current = val;
-  };
+                {showSettingsModal && (
+                    <SettingsModal
+                        settingsNick={settingsNick} setSettingsNick={setSettingsNick}
+                        settingsApiKey={settingsApiKey} setSettingsApiKey={setSettingsApiKey}
+                        settingsNavyApiKey={settingsNavyApiKey} setSettingsNavyApiKey={setSettingsNavyApiKey}
+                        saveSettings={handleSaveSettings} setShowSettingsModal={setShowSettingsModal}
+                        lang={lang} user={user}
+                    />
+                )}
 
-  const handleSubmitAction = (force: boolean = false) => {
-      if (!gameState.lobbyCode) return;
+                {toast && <Toast toast={toast} />}
 
-      // Validation?
-      if (!force && actionInput.length < MIN_CHARS) {
-          setErrorMsg(`${t('chars', lang)}: ${actionInput.length}/${MIN_CHARS}`);
-          return;
-      }
-
-      setLoading(true);
-      SocketService.submitAction(gameState.lobbyCode, actionInput);
-      setLoading(false);
-      setErrorMsg('');
-  };
-
-  const handleRevealResults = () => {
-      if (gameState.lobbyCode) {
-          SocketService.revealResults(gameState.lobbyCode);
-      }
-  };
-
-  const handleRestart = () => {
-      if (gameState.lobbyCode) {
-          SocketService.resetGame(gameState.lobbyCode);
-      }
-  };
-
-  const handleShare = () => {
-      const link = `https://t.me/AgainstAIBot?startapp=${gameState.lobbyCode}`;
-      navigator.clipboard.writeText(link);
-      setToast({ msg: t('linkCopied', lang), type: 'success' });
-  };
-
-  // Interactions
-  const [scenarioRevealed, setScenarioRevealed] = useState(false);
-  const [textRevealed, setTextRevealed] = useState(false);
-
-  useEffect(() => {
-      if (gameState.status === GameStatus.PLAYER_INPUT) {
-          setScenarioRevealed(false);
-          setActionInput('');
-      } else if (gameState.status === GameStatus.RESULTS) {
-          setTextRevealed(false);
-      }
-  }, [gameState.status]);
-
-  const handleScenarioTap = () => {
-      if (!scenarioRevealed) {
-          window.Telegram?.WebApp?.HapticFeedback.impactOccurred('medium');
-          setScenarioRevealed(true);
-      }
-  };
-
-  const handleResultsTap = () => {
-       if (!textRevealed) {
-           window.Telegram?.WebApp?.HapticFeedback.impactOccurred('medium');
-           setTextRevealed(true);
-       }
-  };
-
-  // -- Render Helpers --
-
-  const displayedScenario = scenarioRevealed
-    ? (gameState.scenario || '')
-    : (gameState.scenario ? gameState.scenario.substring(0, 50) + '...' : '');
-
-  const displayedText = textRevealed
-    ? (gameState.roundResult?.story || '')
-    : (gameState.roundResult?.story ? gameState.roundResult.story.substring(0, 50) + '...' : '');
-
-  // -- Views --
-
-  if (gameState.status === GameStatus.HOME) {
-      return (
-          <div className="min-h-screen flex flex-col items-center justify-center p-6 space-y-8 animate-fade-in relative">
-              {/* Settings Button */}
-              <button
-                onClick={() => setShowSettingsModal(true)}
-                className="absolute top-4 right-4 p-2 text-tg-hint hover:text-tg-text transition-colors"
-              >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-              </button>
-
-              <h1 className="text-4xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-600 drop-shadow-sm">
-                  AGAINST AI
-              </h1>
-
-              <div className="w-full max-w-xs space-y-4">
-                  <Button onClick={handleCreateLobby} isLoading={loading}>
-                      {t('createLobby', lang)}
-                  </Button>
-
-                  <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                          <span className="w-full border-t border-tg-hint/20"></span>
-                      </div>
-                      <div className="relative flex justify-center text-xs uppercase">
-                          <span className="bg-tg-bg px-2 text-tg-hint">{t('or', lang)}</span>
-                      </div>
-                  </div>
-
-                  <CodeInput onComplete={handleJoinLobby} label={t('enterCode', lang)} />
-              </div>
-
-              {showSettingsModal && (
-                  <SettingsModal
-                      settingsNick={settingsNick} setSettingsNick={setSettingsNick}
-                      settingsApiKey={settingsApiKey} setSettingsApiKey={setSettingsApiKey}
-                      settingsNavyApiKey={settingsNavyApiKey} setSettingsNavyApiKey={setSettingsNavyApiKey}
-                      saveSettings={handleSaveSettings} setShowSettingsModal={setShowSettingsModal}
-                      lang={lang} user={user}
-                  />
-              )}
-
-              {toast && <Toast message={toast.msg} type={toast.type} />}
-
-              {/* Optional: Add a "Connecting..." indicator if needed */}
-              {loading && <div className="absolute inset-0 bg-black/80 z-50 flex flex-col items-center justify-center space-y-4 animate-fade-in backdrop-blur-sm">
-                   <div className="w-12 h-12 border-4 border-game-accent border-t-transparent rounded-full animate-spin"></div>
-                   <div className="text-game-accent font-mono text-sm tracking-widest animate-pulse">CONNECTING TO LOBBY...</div>
-              </div>}
-          </div>
-      );
-  }
-
-  if (gameState.status === GameStatus.LOBBY_WAITING || gameState.status === GameStatus.LOBBY_SETUP || gameState.status === GameStatus.LOBBY_STARTING) {
-      return (
-          <>
-            <LobbyView
-                gameState={gameState}
-                user={user}
-                onUpdateSettings={handleUpdateSettings}
-                onStartGame={handleStartGame}
-                onSaveSettings={handleSaveSettingsFromLobby}
-                initialNick={settingsNick}
-                initialApiKey={settingsApiKey}
-                initialNavyKey={settingsNavyApiKey}
-                initialLang={lang}
-            />
-            {toast && <Toast message={toast.msg} type={toast.type} />}
-          </>
-      );
-  }
-
-  if (gameState.status === GameStatus.SCENARIO_GENERATION) {
-      return (
-          <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center space-y-6">
-              <div className="w-16 h-16 border-4 border-tg-button border-t-transparent rounded-full animate-spin"></div>
-              <h2 className="text-2xl font-bold animate-pulse">{t('generatingScenario', lang)}</h2>
-              <p className="text-tg-hint text-sm">{t('geminiThinking', lang)}</p>
-          </div>
-      );
-  }
-
-  if (gameState.status === GameStatus.PLAYER_INPUT) {
-      const totalTime = gameState.settings.timeLimitSeconds;
-      const timeLeft = timeLeftDisplay;
-
-      // Calculate Low Time Thresholds: 10% or 60s (whichever is smaller), 5% or 30s (whichever is smaller)
-      // This caps the visual effect duration for long games while preserving percentage for short games.
-      const isLowTime = timeLeft <= Math.min(60, totalTime * 0.1);
-      const isCriticalTime = timeLeft <= Math.min(30, totalTime * 0.05);
-      const isVeryCritical = timeLeft <= 3;
-
-      return (
-          <div className={`min-h-screen flex flex-col p-4 relative transition-colors duration-500 ${isCriticalTime ? 'bg-red-900/20 animate-pulse-red' : ''} ${isVeryCritical ? 'animate-shake' : ''}`}>
-
-              {/* Timer - Only show when revealed */}
-              <div className={`flex justify-between items-center mb-4 bg-tg-secondaryBg p-3 rounded-lg sticky top-0 z-10 shadow-lg transition-all duration-300 ${scenarioRevealed ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'} ${isLowTime ? 'animate-shake' : ''}`}>
-                  <span className={`text-sm font-bold ${isCriticalTime ? 'text-red-500 animate-pulse' : 'text-tg-hint'}`}>{t('timeLeft', lang)}</span>
-                  <span className={`text-2xl font-mono font-bold ${isCriticalTime ? 'text-red-600 animate-pulse' : 'text-tg-text'}`}>{timeLeftDisplay}s</span>
-              </div>
-
-              <div
-                  className="bg-gradient-to-b from-gray-900 to-gray-800 p-5 rounded-2xl border border-gray-700 shadow-xl mb-6 transition-all active:scale-[0.98]"
-                  onClick={handleScenarioTap}
-              >
-                  {gameState.scenarioImage && (
-                      <div className="mb-4 rounded-xl overflow-hidden shadow-lg border border-gray-600">
-                          <img src={gameState.scenarioImage} alt="Scenario" className="w-full h-auto object-cover" />
-                      </div>
-                  )}
-                  {gameState.scenarioAudio && (
-                      <div className="mb-4 w-full">
-                          <audio controls autoPlay src={gameState.scenarioAudio} className="w-full h-8" />
-                      </div>
-                  )}
-                  <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">{t('situation', lang)}</h3>
-                  <MarkdownDisplay content={displayedScenario} />
-                  {!scenarioRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
-              </div>
-
-              {/* Input Area - Fade in when revealed */}
-              <div className={`flex-grow flex flex-col space-y-2 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                  <label className="text-sm text-tg-hint">{t('submitAction', lang)}</label>
-                  <textarea 
-                    className="w-full flex-grow bg-tg-secondaryBg p-4 rounded-xl border border-tg-hint/20 focus:border-tg-button focus:outline-none resize-none transition-colors focus:ring-1 focus:ring-tg-button"
-                    placeholder={t('placeholderAction', lang)}
-                    value={actionInput}
-                    onChange={(e) => handleActionInputChange(e.target.value)}
-                    disabled={!scenarioRevealed || user?.status === 'ready'}
-                    maxLength={gameState.settings.charLimit}
-                  />
-                  <div className="flex justify-between text-xs text-tg-hint px-1">
-                      <span>{actionInput.length} / {gameState.settings.charLimit}</span>
-                      {errorMsg && <span className="text-red-500 font-bold">{errorMsg}</span>}
-                  </div>
-              </div>
-
-              <div className={`mt-4 pb-4 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                  {user?.status === 'ready' ? (
-                      <Button disabled className="bg-green-600 text-white">{t('actionSubmitted', lang)}</Button>
-                  ) : (
-                      <Button onClick={() => handleSubmitAction(false)} isLoading={loading}>
-                          {t('submit', lang)}
-                      </Button>
-                  )}
-              </div>
-          </div>
-      );
-  }
-
-  if (gameState.status === GameStatus.JUDGING) {
-     return (
-        <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center space-y-6">
-            <div className="flex space-x-2">
-                <div className="w-4 h-4 bg-tg-button rounded-full animate-bounce"></div>
-                <div className="w-4 h-4 bg-tg-button rounded-full animate-bounce delay-100"></div>
-                <div className="w-4 h-4 bg-tg-button rounded-full animate-bounce delay-200"></div>
+                {/* Optional: Add a "Connecting..." indicator if needed */}
+                {loading && <div className="absolute inset-0 bg-black/80 z-50 flex flex-col items-center justify-center space-y-4 animate-fade-in backdrop-blur-sm">
+                    <div className="w-12 h-12 border-4 border-game-accent border-t-transparent rounded-full animate-spin"></div>
+                    <div className="text-game-accent font-mono text-sm tracking-widest animate-pulse">CONNECTING TO LOBBY...</div>
+                </div>}
             </div>
-            <h2 className="text-2xl font-bold">{t('judging', lang)}</h2>
-            <p className="text-tg-hint">{t('analyzing', lang)}</p>
-        </div>
-     );
-  }
+        );
+    }
 
-  if (gameState.status === GameStatus.RESULTS && gameState.roundResult) {
-      return (
-          <div className="min-h-screen flex flex-col p-4">
-              <h2 className="text-3xl font-black mb-6 text-center">{t('results', lang)}</h2>
-              
-              {gameState.roundResult?.image && (
-                  <div className="mb-6 rounded-2xl overflow-hidden shadow-2xl border border-tg-hint/20">
-                      <img src={gameState.roundResult.image} alt="Result" className="w-full h-auto object-cover" />
-                  </div>
-              )}
+    if (gameState.status === GameStatus.LOBBY_WAITING || gameState.status === GameStatus.LOBBY_SETUP || gameState.status === GameStatus.LOBBY_STARTING) {
+        return (
+            <>
+                <LobbyView
+                    gameState={gameState}
+                    user={user}
+                    onUpdateSettings={handleUpdateSettings}
+                    onStartGame={handleStartGame}
+                    onSaveSettings={handleSaveSettingsFromLobby}
+                    initialNick={settingsNick}
+                    initialApiKey={settingsApiKey}
+                    initialNavyKey={settingsNavyApiKey}
+                    initialLang={lang}
+                />
+                {toast && <Toast toast={toast} />}
+            </>
+        );
+    }
 
-              {gameState.roundResult?.audio && (
-                  <div className="mb-6 w-full">
-                      <audio controls autoPlay src={gameState.roundResult.audio} className="w-full h-8" />
-                  </div>
-              )}
-              <div
-                  className="bg-tg-secondaryBg p-5 rounded-2xl mb-6 shadow-lg border border-tg-hint/10 min-h-[200px]"
-                  onClick={handleResultsTap}
-              >
-                  <MarkdownDisplay content={displayedText} />
-                  {!textRevealed && !gameState.resultsRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
-              </div>
+    if (gameState.status === GameStatus.SCENARIO_GENERATION) {
+        return (
+            <InteractiveLoadingScreen
+                phase={loadingPhase}
+                wheelConfig={wheelConfig}
+                votingConfig={votingConfig}
+                votingResults={votingResults}
+                loadingText={loadingText}
+                lang={lang}
+                onVote={handleInteractiveLoadingScreenVote}
+                onWheelSpinComplete={() => {
+                    // Not actively used in our orchestration, but implemented for completeness
+                }}
+            />
+        );
+    }
 
-               {/* Captain Show Button */}
-               {user?.isCaptain && textRevealed && !gameState.resultsRevealed && (
-                   <div className="mb-6 animate-fade-in">
-                       <Button onClick={handleRevealResults} className="bg-yellow-600 text-white animate-pulse">
-                           SHOW RESULTS
-                       </Button>
-                   </div>
-               )}
+    if (gameState.status === GameStatus.PLAYER_INPUT) {
+        const totalTime = gameState.settings.timeLimitSeconds;
+        const timeLeft = timeLeftDisplay;
 
-              {gameState.resultsRevealed && (
-                  <div className="space-y-3 mb-8 animate-fade-in">
-                      <h3 className="text-sm font-bold text-tg-hint uppercase">{t('statusReport', lang)}</h3>
-                      {gameState.players.map((p, index) => {
-                          const deathInfo = gameState.roundResult!.deaths.find(d => d.playerId === p.id);
-                          return (
-                              <div
-                                key={p.id}
-                                className={`flex items-center justify-between p-3 rounded-lg border animate-slide-up ${deathInfo ? 'border-red-900 bg-red-900/10' : 'border-green-900 bg-green-900/10'}`}
-                                style={{ animationDelay: `${index * 100}ms` }}
-                              >
-                                  <span className="font-bold">{p.name}</span>
-                                  <span className={`text-xs font-bold px-2 py-1 rounded ${deathInfo ? 'bg-red-600 text-white' : 'bg-green-600 text-white'}`}>
-                                      {deathInfo ? (deathInfo.reason || t('died', lang)) : t('survived', lang)}
-                                  </span>
-                              </div>
-                          );
-                      })}
-                  </div>
-              )}
+        // Calculate Low Time Thresholds: 10% or 60s (whichever is smaller), 5% or 30s (whichever is smaller)
+        // This caps the visual effect duration for long games while preserving percentage for short games.
+        const isLowTime = timeLeft <= Math.min(60, totalTime * 0.1);
+        const isCriticalTime = timeLeft <= Math.min(30, totalTime * 0.05);
+        const isVeryCritical = timeLeft <= 3;
 
-              {gameState.resultsRevealed && (
-                <Button onClick={handleRestart} className="mt-auto mb-6">
-                    {t('playAgain', lang)}
-                </Button>
-              )}
-          </div>
-      );
-  }
+        return (
+            <div className={`min-h-screen flex flex-col p-4 relative transition-colors duration-500 ${isCriticalTime ? 'bg-red-900/20 animate-pulse-red' : ''} ${isVeryCritical ? 'animate-shake' : ''}`}>
 
-  return <div className="p-10 text-center">{t('loading', lang)}</div>;
+                {/* Timer - Only show when revealed */}
+                <div className={`flex justify-between items-center mb-4 bg-tg-secondaryBg p-3 rounded-lg sticky top-0 z-10 shadow-lg transition-all duration-300 ${scenarioRevealed ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'} ${isLowTime ? 'animate-shake' : ''}`}>
+                    <span className={`text-sm font-bold ${isCriticalTime ? 'text-red-500 animate-pulse' : 'text-tg-hint'}`}>{t('timeLeft', lang)}</span>
+                    <span className={`text-2xl font-mono font-bold ${isCriticalTime ? 'text-red-600 animate-pulse' : 'text-tg-text'}`}>{timeLeftDisplay}s</span>
+                </div>
+
+                <div
+                    className="bg-gradient-to-b from-gray-900 to-gray-800 p-5 rounded-2xl border border-gray-700 shadow-xl mb-6 transition-all active:scale-[0.98]"
+                    onClick={handleScenarioTap}
+                >
+                    {gameState.scenarioImage && (
+                        <div className="mb-4 rounded-xl overflow-hidden shadow-lg border border-gray-600">
+                            <img src={gameState.scenarioImage} alt="Scenario" className="w-full h-auto object-cover" />
+                        </div>
+                    )}
+                    {gameState.scenarioAudio && (
+                        <div className="mb-4 w-full">
+                            <audio controls autoPlay src={gameState.scenarioAudio} className="w-full h-8" />
+                        </div>
+                    )}
+                    <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">{t('situation', lang)}</h3>
+                    <MarkdownDisplay content={displayedScenario} />
+                    {!scenarioRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
+                </div>
+
+                {/* Input Area - Fade in when revealed */}
+                <div className={`flex-grow flex flex-col space-y-2 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                    <label className="text-sm text-tg-hint">{t('submitAction', lang)}</label>
+                    <textarea
+                        className="w-full flex-grow bg-tg-secondaryBg p-4 rounded-xl border border-tg-hint/20 focus:border-tg-button focus:outline-none resize-none transition-colors focus:ring-1 focus:ring-tg-button"
+                        placeholder={t('placeholderAction', lang)}
+                        value={actionInput}
+                        onChange={(e) => handleActionInputChange(e.target.value)}
+                        disabled={!scenarioRevealed || user?.status === 'ready'}
+                        maxLength={gameState.settings.charLimit}
+                    />
+                    <div className="flex justify-between text-xs text-tg-hint px-1">
+                        <span>{actionInput.length} / {gameState.settings.charLimit}</span>
+                        {errorMsg && <span className="text-red-500 font-bold">{errorMsg}</span>}
+                    </div>
+                </div>
+
+                <div className={`mt-4 pb-4 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                    {user?.status === 'ready' ? (
+                        <Button disabled className="bg-green-600 text-white">{t('actionSubmitted', lang)}</Button>
+                    ) : (
+                        <Button onClick={() => handleSubmitAction(false)} isLoading={loading}>
+                            {t('submit', lang)}
+                        </Button>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    if (gameState.status === GameStatus.JUDGING) {
+        return (
+            <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center space-y-6">
+                <div className="flex space-x-2">
+                    <div className="w-4 h-4 bg-tg-button rounded-full animate-bounce"></div>
+                    <div className="w-4 h-4 bg-tg-button rounded-full animate-bounce delay-100"></div>
+                    <div className="w-4 h-4 bg-tg-button rounded-full animate-bounce delay-200"></div>
+                </div>
+                <h2 className="text-2xl font-bold">{t('judging', lang)}</h2>
+                <p className="text-tg-hint">{t('analyzing', lang)}</p>
+            </div>
+        );
+    }
+
+    if (gameState.status === GameStatus.RESULTS && gameState.roundResult) {
+        return (
+            <div className="min-h-screen flex flex-col p-4">
+                <h2 className="text-3xl font-black mb-6 text-center">{t('results', lang)}</h2>
+
+                {gameState.roundResult?.image && (
+                    <div className="mb-6 rounded-2xl overflow-hidden shadow-2xl border border-tg-hint/20">
+                        <img src={gameState.roundResult.image} alt="Result" className="w-full h-auto object-cover" />
+                    </div>
+                )}
+
+                {gameState.roundResult?.audio && (
+                    <div className="mb-6 w-full">
+                        <audio controls autoPlay src={gameState.roundResult.audio} className="w-full h-8" />
+                    </div>
+                )}
+                <div
+                    className="bg-tg-secondaryBg p-5 rounded-2xl mb-6 shadow-lg border border-tg-hint/10 min-h-[200px]"
+                    onClick={handleResultsTap}
+                >
+                    <MarkdownDisplay content={displayedText} />
+                    {!textRevealed && !gameState.resultsRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
+                </div>
+
+                {/* Captain Show Button */}
+                {user?.isCaptain && textRevealed && !gameState.resultsRevealed && (
+                    <div className="mb-6 animate-fade-in">
+                        <Button onClick={handleRevealResults} className="bg-yellow-600 text-white animate-pulse">
+                            SHOW RESULTS
+                        </Button>
+                    </div>
+                )}
+
+                {gameState.resultsRevealed && (
+                    <div className="space-y-3 mb-8 animate-fade-in">
+                        <h3 className="text-sm font-bold text-tg-hint uppercase">{t('statusReport', lang)}</h3>
+                        {gameState.players.map((p, index) => {
+                            const deathInfo = gameState.roundResult!.deaths.find(d => d.playerId === p.id);
+                            return (
+                                <div
+                                    key={p.id}
+                                    className={`flex items-center justify-between p-3 rounded-lg border animate-slide-up ${deathInfo ? 'border-red-900 bg-red-900/10' : 'border-green-900 bg-green-900/10'}`}
+                                    style={{ animationDelay: `${index * 100}ms` }}
+                                >
+                                    <span className="font-bold">{p.name}</span>
+                                    <span className={`text-xs font-bold px-2 py-1 rounded ${deathInfo ? 'bg-red-600 text-white' : 'bg-green-600 text-white'}`}>
+                                        {deathInfo ? (deathInfo.reason || t('died', lang)) : t('survived', lang)}
+                                    </span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+
+                {gameState.resultsRevealed && (
+                    <Button onClick={handleRestart} className="mt-auto mb-6">
+                        {t('playAgain', lang)}
+                    </Button>
+                )}
+            </div>
+        );
+    }
+
+    return <div className="p-10 text-center">{t('loading', lang)}</div>;
 };
 
 export default App;

@@ -1,5 +1,30 @@
 export type Language = 'en' | 'ru';
 
+export type LoadingPhase = 'WHEEL' | 'SHOW_RESULT' | 'VOTING' | 'VOTING_RESULTS';
+export type RoundType = 'NORMAL' | 'SPECIAL' | 'BOSS_FIGHT';
+
+export interface WheelConfig {
+  segments: {
+    type: RoundType;
+    label: string;
+    color: string;
+    probability: number;
+  }[];
+  targetIndex: number;
+}
+
+export interface VotingConfig {
+  question: string;
+  candidates: Omit<Player, 'status' | 'actionText'>[];
+  myVoteId: string | null;
+  timeLeft: number;
+}
+
+export interface VotingResults {
+  winnerId: string;
+  votesDistribution: Record<string, number>;
+}
+
 export enum GameMode {
   COOP = 'coop',
   PVP = 'pvp',
@@ -138,6 +163,7 @@ export interface TelegramWebApp {
     impactOccurred: (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft') => void;
     notificationOccurred: (type: 'error' | 'success' | 'warning') => void;
   };
+  themeParams?: Record<string, string>;
 }
 
 declare global {
