@@ -80,6 +80,7 @@ export interface ServerGameState {
   geminiKeys: string[];
   navyKeys: string[];
   resultsRevealed: boolean;
+  playerSecrets?: Record<string, string>; // Map<playerId, secretText>
 }
 
 // Client-Side State (Safe)

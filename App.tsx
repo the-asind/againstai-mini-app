@@ -9,6 +9,8 @@ import { CodeInput } from './components/CodeInput';
 import { MarkdownDisplay } from './components/MarkdownDisplay';
 import { Toast } from './components/Toast';
 import { LobbyView } from './components/LobbyView';
+import { SecretModal } from './components/SecretModal';
+import { ShieldAlert } from 'lucide-react';
 
 // Helper to count keys
 const getKeyCount = (): 0 | 1 | 2 => {
@@ -211,6 +213,10 @@ const App: React.FC = () => {
   // Toast State
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
 
+  // Secret Data State
+  const [secretData, setSecretData] = useState<string | null>(null);
+  const [secretViewed, setSecretViewed] = useState(false);
+
   // Refs needed for intervals and scrolling
   const timeLeftRef = useRef<number>(0);
   const [timeLeftDisplay, setTimeLeftDisplay] = useState(0);
@@ -291,6 +297,14 @@ const App: React.FC = () => {
         setToast({ msg: err.message, type: 'error' });
     });
 
+    // Subscribe to secrets
+    const unsubSecrets = SocketService.subscribeToSecretData(({ secret }) => {
+        setSecretData(secret);
+        setSecretViewed(false); // Reset viewed state when new secret arrives
+        // Haptic feedback
+        window.Telegram?.WebApp?.HapticFeedback.notificationOccurred('warning');
+    });
+
     // Initialize and Connect
     initApp().then(() => {
         SocketService.connect();
@@ -299,6 +313,7 @@ const App: React.FC = () => {
     return () => {
         unsubState();
         unsubError();
+        unsubSecrets();
     };
   }, []);
 
@@ -364,6 +379,18 @@ const App: React.FC = () => {
           return () => clearTimeout(timer);
       }
   }, [toast]);
+
+  // Reset Secret Data on Round End
+  useEffect(() => {
+      if (gameState.status !== GameStatus.PLAYER_INPUT) {
+          // If we leave player input, reset secret state
+          // We keep it during input phase
+          if (gameState.status === GameStatus.RESULTS || gameState.status === GameStatus.JUDGING || gameState.status === GameStatus.SCENARIO_GENERATION) {
+             setSecretData(null);
+             setSecretViewed(false);
+          }
+      }
+  }, [gameState.status]);
 
   // -- Handlers --
 
@@ -605,6 +632,10 @@ const App: React.FC = () => {
        }
   };
 
+  const handleSecretViewed = () => {
+      setSecretViewed(true);
+  };
+
   // -- Render Helpers --
 
   const displayedScenario = scenarioRevealed
@@ -715,6 +746,11 @@ const App: React.FC = () => {
       return (
           <div className={`min-h-screen flex flex-col p-4 relative transition-colors duration-500 ${isCriticalTime ? 'bg-red-900/20 animate-pulse-red' : ''} ${isVeryCritical ? 'animate-shake' : ''}`}>
 
+              {/* Secret Data Modal */}
+              {secretData && !secretViewed && (
+                 <SecretModal secret={secretData} onClose={handleSecretViewed} lang={lang} />
+              )}
+
               {/* Timer - Only show when revealed */}
               <div className={`flex justify-between items-center mb-4 bg-tg-secondaryBg p-3 rounded-lg sticky top-0 z-10 shadow-lg transition-all duration-300 ${scenarioRevealed ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'} ${isLowTime ? 'animate-shake' : ''}`}>
                   <span className={`text-sm font-bold ${isCriticalTime ? 'text-red-500 animate-pulse' : 'text-tg-hint'}`}>{t('timeLeft', lang)}</span>
@@ -741,23 +777,39 @@ const App: React.FC = () => {
               </div>
 
               {/* Input Area - Fade in when revealed */}
-              <div className={`flex-grow flex flex-col space-y-2 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                  <label className="text-sm text-tg-hint">{t('submitAction', lang)}</label>
-                  <textarea 
-                    className="w-full flex-grow bg-tg-secondaryBg p-4 rounded-xl border border-tg-hint/20 focus:border-tg-button focus:outline-none resize-none transition-colors focus:ring-1 focus:ring-tg-button"
-                    placeholder={t('placeholderAction', lang)}
-                    value={actionInput}
-                    onChange={(e) => handleActionInputChange(e.target.value)}
-                    disabled={!scenarioRevealed || user?.status === 'ready'}
-                    maxLength={gameState.settings.charLimit}
-                  />
-                  <div className="flex justify-between text-xs text-tg-hint px-1">
-                      <span>{actionInput.length} / {gameState.settings.charLimit}</span>
-                      {errorMsg && <span className="text-red-500 font-bold">{errorMsg}</span>}
+              {/* BLOCK INPUT IF SECRET NOT VIEWED */}
+              {secretData && !secretViewed ? (
+                  <div className="flex-grow flex flex-col items-center justify-center space-y-4 animate-pulse">
+                      <div className="text-red-500 font-mono font-bold text-lg tracking-widest text-center animate-bounce">
+                           {lang === 'ru' ? 'ВХОДЯЩЕЕ СООБЩЕНИЕ' : 'INCOMING TRANSMISSION'}
+                      </div>
+                      <Button onClick={() => setSecretViewed(false)} className="bg-red-900/50 border-red-500 text-red-100 hover:bg-red-900">
+                          <ShieldAlert className="mr-2" size={18} />
+                          {lang === 'ru' ? 'ОТКРЫТЬ СЕКРЕТНЫЙ КАНАЛ' : 'OPEN SECURE CHANNEL'}
+                      </Button>
+                      <p className="text-xs text-tg-hint text-center max-w-xs">
+                          {lang === 'ru' ? 'Вы должны прочитать личное сообщение перед тем, как действовать.' : 'You must acknowledge your private directive before acting.'}
+                      </p>
                   </div>
-              </div>
+              ) : (
+                <div className={`flex-grow flex flex-col space-y-2 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                    <label className="text-sm text-tg-hint">{t('submitAction', lang)}</label>
+                    <textarea
+                        className="w-full flex-grow bg-tg-secondaryBg p-4 rounded-xl border border-tg-hint/20 focus:border-tg-button focus:outline-none resize-none transition-colors focus:ring-1 focus:ring-tg-button"
+                        placeholder={t('placeholderAction', lang)}
+                        value={actionInput}
+                        onChange={(e) => handleActionInputChange(e.target.value)}
+                        disabled={!scenarioRevealed || user?.status === 'ready'}
+                        maxLength={gameState.settings.charLimit}
+                    />
+                    <div className="flex justify-between text-xs text-tg-hint px-1">
+                        <span>{actionInput.length} / {gameState.settings.charLimit}</span>
+                        {errorMsg && <span className="text-red-500 font-bold">{errorMsg}</span>}
+                    </div>
+                </div>
+              )}
 
-              <div className={`mt-4 pb-4 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+              <div className={`mt-4 pb-4 transition-opacity duration-500 ${scenarioRevealed && (secretViewed || !secretData) ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                   {user?.status === 'ready' ? (
                       <Button disabled className="bg-green-600 text-white">{t('actionSubmitted', lang)}</Button>
                   ) : (
