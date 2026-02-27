@@ -71,6 +71,7 @@ export interface Player {
   isOnline: boolean;
   keyCount: 0 | 1 | 2; // Stricter type: 0, 1, or 2
   navyUsage?: { tokens: number; plan?: string };
+  loadingVote?: string;
 }
 
 export enum AIModelLevel {

@@ -110,7 +110,7 @@ export const InteractiveLoadingScreen: React.FC<InteractiveLoadingScreenProps> =
       const finalRotation = spins * 360 + (360 - targetAngle);
 
       const controls = animate(wheelRotation, finalRotation, {
-        duration: 20, // +5 seconds for a long deceleration
+        duration: 4.5, // much faster spin!
         ease: [0.1, 0.9, 0.1, 1], // Custom curve for very slow tail
         onComplete: onWheelSpinComplete
       });
@@ -310,10 +310,10 @@ export const InteractiveLoadingScreen: React.FC<InteractiveLoadingScreenProps> =
                 onClick={() => !hasVoted && onVote(candidate.id)}
                 disabled={hasVoted}
                 className={`flex items-center gap-4 p-3 rounded-sm border transition-all ${isSelected
-                    ? 'bg-tg-button/20 border-tg-button shadow-[0_0_15px_rgba(46,160,94,0.2)] text-tg-button'
-                    : hasVoted
-                      ? 'bg-black/40 border-white/5 opacity-50 cursor-not-allowed'
-                      : 'bg-tg-secondaryBg border-tg-button/20 hover:border-tg-button/50 hover:bg-black/60'
+                  ? 'bg-tg-button/20 border-tg-button shadow-[0_0_15px_rgba(46,160,94,0.2)] text-tg-button'
+                  : hasVoted
+                    ? 'bg-black/40 border-white/5 opacity-50 cursor-not-allowed'
+                    : 'bg-tg-secondaryBg border-tg-button/20 hover:border-tg-button/50 hover:bg-black/60'
                   }`}
               >
                 {/* Fallback avatar if none provided */}

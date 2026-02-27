@@ -227,7 +227,7 @@ const App: React.FC = () => {
     const [votingResults, setVotingResults] = useState<VotingResults | undefined>();
 
     // Timer for the loading screen voting phase
-    const votingTimerRef = useRef<NodeJS.Timeout>();
+    const votingTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
     // -- Effects --
 
@@ -372,99 +372,135 @@ const App: React.FC = () => {
         }
     }, [toast]);
 
-    // Loading Screen Orchestration
+    const voteRoundRef = useRef<number>(0);
+    const sequenceTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
+
+    const gameStateRef = useRef(gameState);
+    useEffect(() => {
+        gameStateRef.current = gameState;
+    }, [gameState]);
+
+    const endVotingPhase = useCallback((state: GameState) => {
+        clearInterval(votingTimerRef.current);
+
+        setLoadingPhase('VOTING_RESULTS');
+        setLoadingText(lang === 'ru' ? 'Подведение итогов...' : 'Finalizing calculations...');
+
+        // Compute Results Based on Real loadingVotes
+        const distribution: Record<string, number> = {};
+        state.players.forEach(p => {
+            if (p.loadingVote) {
+                distribution[p.loadingVote] = (distribution[p.loadingVote] || 0) + 1;
+            }
+        });
+
+        let winnerId = '';
+        let maxVotes = -1;
+        for (const [cId, count] of Object.entries(distribution)) {
+            if (count > maxVotes) {
+                winnerId = cId;
+                maxVotes = count;
+            }
+        }
+
+        // Fallback winner if nobody voted
+        if (winnerId === '' && state.players.length > 0) {
+            winnerId = state.players[0].id; // default to first
+        }
+
+        setVotingResults({ winnerId, votesDistribution: distribution });
+
+        // Wait 5s then restart voting
+        sequenceTimeoutRef.current = setTimeout(() => {
+            if (gameStateRef.current.status !== GameStatus.SCENARIO_GENERATION) return;
+            voteRoundRef.current++;
+            startVotingPhase();
+        }, 5000);
+    }, [lang]);
+
+    const startVotingPhase = useCallback(() => {
+        setLoadingPhase('VOTING');
+        setLoadingText(lang === 'ru' ? 'Сбор протоколов...' : 'Collecting protocols...');
+
+        const state = gameStateRef.current;
+        // Determine Question Deterministically
+        const questions = lang === 'ru' ? WHO_IS_MOST_LIKELY_QUESTIONS_RU : WHO_IS_MOST_LIKELY_QUESTIONS_EN;
+        const seed = Array.from(state.lobbyCode || "").reduce((a, b) => a + b.charCodeAt(0), 0) + voteRoundRef.current;
+        const randomQuestion = questions[seed % questions.length];
+
+        // Clear local vote first
+        if (state.lobbyCode) {
+            SocketService.updatePlayer(state.lobbyCode, { loadingVote: undefined });
+        }
+
+        setVotingConfig({
+            question: randomQuestion,
+            candidates: state.players,
+            myVoteId: null,
+            timeLeft: 15
+        });
+
+        clearInterval(votingTimerRef.current);
+        votingTimerRef.current = setInterval(() => {
+            setVotingConfig(prev => {
+                if (!prev) return prev;
+                // Since this runs every 1000ms, when it hits 1, we change to 0 and end phase next tick or now
+                if (prev.timeLeft <= 1) {
+                    clearInterval(votingTimerRef.current);
+                    endVotingPhase(gameStateRef.current);
+                    return prev;
+                }
+                return { ...prev, timeLeft: prev.timeLeft - 1 };
+            });
+        }, 1000);
+    }, [lang, endVotingPhase]);
+
+    // Handle Wheel Spin Complete
+    const handleWheelSpinComplete = useCallback(() => {
+        setLoadingPhase('SHOW_RESULT');
+        setLoadingText(lang === 'ru' ? 'Генерация окружения...' : 'Generating environment...');
+
+        sequenceTimeoutRef.current = setTimeout(() => {
+            if (gameStateRef.current.status === GameStatus.SCENARIO_GENERATION) {
+                startVotingPhase();
+            }
+        }, 3000);
+    }, [lang, startVotingPhase]);
+
+    // Loading Screen Orchestration initiation and cleanup
     useEffect(() => {
         if (gameState.status !== GameStatus.SCENARIO_GENERATION) {
-            if (votingTimerRef.current) clearInterval(votingTimerRef.current);
+            clearTimeout(sequenceTimeoutRef.current);
+            clearInterval(votingTimerRef.current);
             return;
         }
 
-        let isMounted = true;
-        let sequenceTimeout: NodeJS.Timeout;
-
-        const runSequence = async () => {
-            // 1. WHEEL PHASE
-            setLoadingPhase('WHEEL');
+        // Only logic to start WHEEL if it's new
+        if (loadingPhase === 'WHEEL' && !wheelConfig) {
             setLoadingText(lang === 'ru' ? 'Выбор сценария...' : 'Selecting scenario...');
-
-            // TODO: Fetch real wheel config from server based on current possibilities
-            // This is a mocked wheel config
+            // TODO: Fetch real wheel config from server
+            const seed = Array.from(gameState.lobbyCode || "").reduce((a, b) => a + b.charCodeAt(0), 0);
             setWheelConfig({
                 segments: [
                     { type: 'NORMAL', label: lang === 'ru' ? 'Обычный' : 'Normal', color: '#2EA05E', probability: 0.7 },
                     { type: 'SPECIAL', label: lang === 'ru' ? 'Специальный' : 'Special', color: '#A02E8A', probability: 0.2 },
                     { type: 'BOSS_FIGHT', label: lang === 'ru' ? 'БОСС' : 'BOSS', color: '#A02E2E', probability: 0.1 }
                 ],
-                targetIndex: 0 // Mocking choosing the Normal round
+                targetIndex: seed % 3 // pseudo deterministic until server is attached
             });
+            // The wheel component will take care of the animation duration, then call handleWheelSpinComplete locally inside App.tsx render via prop
+        }
+    }, [gameState.status, loadingPhase, wheelConfig, lang, gameState.lobbyCode]);
 
-            // Wait 1.5s then "spin" (the component handles its own spin animation timing, but we mock the phase change here)
-            // Actually, we'll wait 4s to simulate the entire wheel spin 
-            sequenceTimeout = setTimeout(() => {
-                if (!isMounted) return;
-
-                // 2. SHOW_RESULT PHASE
-                setLoadingPhase('SHOW_RESULT');
-                setLoadingText(lang === 'ru' ? 'Генерация окружения...' : 'Generating environment...');
-
-                // Wait 3s showing the result
-                sequenceTimeout = setTimeout(() => {
-                    if (!isMounted) return;
-
-                    // 3. VOTING PHASE
-                    setLoadingPhase('VOTING');
-                    setLoadingText(lang === 'ru' ? 'Сбор протоколов...' : 'Collecting protocols...');
-
-                    const questions = lang === 'ru' ? WHO_IS_MOST_LIKELY_QUESTIONS_RU : WHO_IS_MOST_LIKELY_QUESTIONS_EN;
-                    const randomQuestion = questions[Math.floor(Math.random() * questions.length)];
-
-                    setVotingConfig({
-                        question: randomQuestion,
-                        candidates: gameState.players,
-                        myVoteId: null,
-                        timeLeft: 15
-                    });
-
-                    // Start Voting Timer
-                    let timeLeft = 15;
-                    votingTimerRef.current = setInterval(() => {
-                        timeLeft -= 1;
-                        setVotingConfig(prev => prev ? { ...prev, timeLeft } : undefined);
-
-                        if (timeLeft <= 0) {
-                            clearInterval(votingTimerRef.current!);
-
-                            const candidates = gameState.players;
-                            if (candidates.length === 0) return;
-
-                            // Mock voting results
-                            // TODO: Integrate actual voting logic with the server
-                            const mockVotesDistribution: Record<string, number> = {};
-                            candidates.forEach(c => mockVotesDistribution[c.id] = Math.floor(Math.random() * 5));
-                            const winnerId = Object.keys(mockVotesDistribution).reduce((a, b) => mockVotesDistribution[a] > mockVotesDistribution[b] ? a : b);
-
-                            setVotingResults({
-                                winnerId: winnerId,
-                                votesDistribution: mockVotesDistribution
-                            });
-
-                            setLoadingPhase('VOTING_RESULTS');
-                            setLoadingText(lang === 'ru' ? 'Завершение расчетов...' : 'Finalizing calculations...');
-                        }
-                    }, 1000);
-
-                }, 3000);
-            }, 4000);
-        };
-
-        runSequence();
-
-        return () => {
-            isMounted = false;
-            clearTimeout(sequenceTimeout);
-            if (votingTimerRef.current) clearInterval(votingTimerRef.current);
-        };
-    }, [gameState.status, lang, gameState.players]);
+    // Fast-forward effect if everyone has voted
+    useEffect(() => {
+        if (gameState.status === GameStatus.SCENARIO_GENERATION && loadingPhase === 'VOTING' && gameState.players.length > 0) {
+            const activePlayers = gameState.players;
+            if (activePlayers.length > 0 && activePlayers.every(p => p.loadingVote)) {
+                endVotingPhase(gameState);
+            }
+        }
+    }, [gameState, loadingPhase, endVotingPhase]);
 
     // -- Handlers --
 
@@ -707,7 +743,8 @@ const App: React.FC = () => {
     };
 
     const handleInteractiveLoadingScreenVote = (candidateId: string) => {
-        // TODO: Send vote to server over socket here
+        if (!gameState.lobbyCode) return;
+        SocketService.updatePlayer(gameState.lobbyCode, { loadingVote: candidateId });
         setVotingConfig(prev => prev ? { ...prev, myVoteId: candidateId } : undefined);
         window.Telegram?.WebApp?.HapticFeedback.impactOccurred('light');
     };
@@ -812,9 +849,7 @@ const App: React.FC = () => {
                 loadingText={loadingText}
                 lang={lang}
                 onVote={handleInteractiveLoadingScreenVote}
-                onWheelSpinComplete={() => {
-                    // Not actively used in our orchestration, but implemented for completeness
-                }}
+                onWheelSpinComplete={handleWheelSpinComplete}
             />
         );
     }
