@@ -635,18 +635,7 @@ export class LobbyService {
          lobby.roundResult = result;
          lobby.status = GameStatus.RESULTS;
          lobby.resultsRevealed = false; // Ensure it starts hidden
-         // Clear secrets for next round (if desired, or keep them if they persist?
-         // Assuming scenario changes every round, secrets reset.
-         // If game is one long story, secrets might persist.
-         // Current implementation: generateScenario is called every game start, but ROUNDS?
-         // Ah, "startRound" is called after game start.
-         // BUT generateScenario is only called in "startGame".
-         // If "submitAction" -> "resolveRound" -> ??
-         // After results, players can "Restart"?
-         // "resetGame" clears everything.
-         // So secrets are per GAME (scenario), not per round?
-         // The prompt implies a single scenario.
-         // Let's assume secrets last for the session until reset.
+         // Secrets persist for the game session until resetGame is called.
 
          lobby.players.forEach(p => {
              if (result.survivors.includes(p.id)) {

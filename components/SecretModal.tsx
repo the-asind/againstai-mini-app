@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Fingerprint, Lock, ShieldAlert } from 'lucide-react';
 import { MarkdownDisplay } from './MarkdownDisplay';
@@ -14,13 +14,19 @@ export const SecretModal: React.FC<SecretModalProps> = ({ secret, onClose, lang 
   const totalTime = 20000; // 20 seconds
   const intervalTime = 100; // update every 100ms
 
+  // Use Ref to avoid resetting interval when onClose changes identity
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+      onCloseRef.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     const timer = setInterval(() => {
       setProgress((prev) => {
         const next = prev - (intervalTime / totalTime) * 100;
         if (next <= 0) {
           clearInterval(timer);
-          onClose();
+          onCloseRef.current(); // Use ref here
           return 0;
         }
         return next;
@@ -28,7 +34,7 @@ export const SecretModal: React.FC<SecretModalProps> = ({ secret, onClose, lang 
     }, intervalTime);
 
     return () => clearInterval(timer);
-  }, [onClose]);
+  }, []); // Empty dependency array = timer doesn't reset
 
   const isUrgent = progress < 15; // Last 3 seconds (approx 15%)
 

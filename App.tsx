@@ -216,6 +216,7 @@ const App: React.FC = () => {
   // Secret Data State
   const [secretData, setSecretData] = useState<string | null>(null);
   const [secretViewed, setSecretViewed] = useState(false);
+  const [isSecretModalOpen, setIsSecretModalOpen] = useState(false); // NEW STATE
 
   // Refs needed for intervals and scrolling
   const timeLeftRef = useRef<number>(0);
@@ -301,6 +302,8 @@ const App: React.FC = () => {
     const unsubSecrets = SocketService.subscribeToSecretData(({ secret }) => {
         setSecretData(secret);
         setSecretViewed(false); // Reset viewed state when new secret arrives
+        setIsSecretModalOpen(false); // Ensure modal is closed initially, wait for user click
+
         // Haptic feedback
         window.Telegram?.WebApp?.HapticFeedback.notificationOccurred('warning');
     });
@@ -388,6 +391,7 @@ const App: React.FC = () => {
           if (gameState.status === GameStatus.RESULTS || gameState.status === GameStatus.JUDGING || gameState.status === GameStatus.SCENARIO_GENERATION) {
              setSecretData(null);
              setSecretViewed(false);
+             setIsSecretModalOpen(false);
           }
       }
   }, [gameState.status]);
@@ -634,6 +638,7 @@ const App: React.FC = () => {
 
   const handleSecretViewed = () => {
       setSecretViewed(true);
+      setIsSecretModalOpen(false); // Close modal when acknowledged
   };
 
   // -- Render Helpers --
@@ -747,7 +752,7 @@ const App: React.FC = () => {
           <div className={`min-h-screen flex flex-col p-4 relative transition-colors duration-500 ${isCriticalTime ? 'bg-red-900/20 animate-pulse-red' : ''} ${isVeryCritical ? 'animate-shake' : ''}`}>
 
               {/* Secret Data Modal */}
-              {secretData && !secretViewed && (
+              {isSecretModalOpen && secretData && (
                  <SecretModal secret={secretData} onClose={handleSecretViewed} lang={lang} />
               )}
 
@@ -783,7 +788,7 @@ const App: React.FC = () => {
                       <div className="text-red-500 font-mono font-bold text-lg tracking-widest text-center animate-bounce">
                            {lang === 'ru' ? 'ВХОДЯЩЕЕ СООБЩЕНИЕ' : 'INCOMING TRANSMISSION'}
                       </div>
-                      <Button onClick={() => setSecretViewed(false)} className="bg-red-900/50 border-red-500 text-red-100 hover:bg-red-900">
+                      <Button onClick={() => setIsSecretModalOpen(true)} className="bg-red-900/50 border-red-500 text-red-100 hover:bg-red-900">
                           <ShieldAlert className="mr-2" size={18} />
                           {lang === 'ru' ? 'ОТКРЫТЬ СЕКРЕТНЫЙ КАНАЛ' : 'OPEN SECURE CHANNEL'}
                       </Button>
