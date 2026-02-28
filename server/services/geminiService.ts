@@ -113,6 +113,9 @@ export const GeminiService = {
         model: modelName,
         contents: prompt,
         config: {
+          // Enable Reasoning for Gemini 3
+          // @ts-ignore - Ignore type error if SDK version is slightly older
+          thinkingConfig: modelName.includes('gemini-3') ? { thinkingLevel: "low" } : undefined,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -120,7 +123,6 @@ export const GeminiService = {
               gm_notes: {
                 type: Type.OBJECT,
                 properties: {
-                  analysis: { type: Type.STRING },
                   hidden_threat_logic: { type: Type.STRING },
                   solution_clues: { type: Type.STRING },
                   sanity_check: { type: Type.STRING }
@@ -147,7 +149,6 @@ export const GeminiService = {
         return {
           scenario_text: text,
           gm_notes: {
-            analysis: "Failed to parse JSON",
             hidden_threat_logic: "Unknown",
             solution_clues: "Unknown",
             sanity_check: "Unknown"

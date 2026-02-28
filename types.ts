@@ -192,7 +192,6 @@ declare global {
 
 export interface ScenarioResponse {
   gm_notes: {
-    analysis: string;
     hidden_threat_logic: string;
     solution_clues: string;
     sanity_check: string;
