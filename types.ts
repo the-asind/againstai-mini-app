@@ -198,6 +198,7 @@ export interface ScenarioResponse {
     sanity_check: string;
   };
   scenario_text: string;
+  secrets?: Record<string, string>; // Map<playerId, secretText>
 }
 
 export interface NavyUsageResponse {
