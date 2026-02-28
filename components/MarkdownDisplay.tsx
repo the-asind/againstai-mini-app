@@ -1,13 +1,50 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 interface MarkdownDisplayProps {
   content: string;
   className?: string;
+  animate?: boolean;
+  onAnimationComplete?: () => void;
 }
 
-export const MarkdownDisplay: React.FC<MarkdownDisplayProps> = ({ content, className = '' }) => {
+export const MarkdownDisplay: React.FC<MarkdownDisplayProps> = ({
+  content,
+  className = '',
+  animate = false,
+  onAnimationComplete
+}) => {
+  const [displayedContent, setDisplayedContent] = useState(animate ? '' : content);
+  const [isAnimating, setIsAnimating] = useState(animate);
+
+  useEffect(() => {
+    if (!animate) {
+      setDisplayedContent(content);
+      setIsAnimating(false);
+      return;
+    }
+
+    let currentIndex = 0;
+    setIsAnimating(true);
+    setDisplayedContent('');
+
+    // A simple typewriter that adds chunks of characters
+    const intervalId = setInterval(() => {
+      currentIndex += Math.floor(Math.random() * 3) + 2; // Add 2-4 chars at a time
+      if (currentIndex >= content.length) {
+        setDisplayedContent(content);
+        clearInterval(intervalId);
+        setIsAnimating(false);
+        if (onAnimationComplete) onAnimationComplete();
+      } else {
+        setDisplayedContent(content.substring(0, currentIndex));
+      }
+    }, 20); // Fast interval
+
+    return () => clearInterval(intervalId);
+  }, [content, animate, onAnimationComplete]);
+
   return (
     <div className={`markdown-body w-full overflow-hidden ${className}`}>
       <ReactMarkdown
@@ -71,8 +108,9 @@ export const MarkdownDisplay: React.FC<MarkdownDisplayProps> = ({ content, class
           td: ({ node, ...props }) => <td className="px-4 py-3 text-tg-text whitespace-normal break-words align-top" {...props} />,
         }}
       >
-        {content}
+        {displayedContent}
       </ReactMarkdown>
+      {isAnimating && <span className="inline-block w-2 h-4 bg-tg-button animate-pulse ml-1 align-middle"></span>}
     </div>
   );
 };

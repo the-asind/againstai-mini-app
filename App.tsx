@@ -522,10 +522,9 @@ const App: React.FC = () => {
 
     // Reset Secret Data on Round End
     useEffect(() => {
-        if (gameState.status !== GameStatus.PLAYER_INPUT) {
-            // If we leave player input, reset secret state
-            // We keep it during input phase
-            if (gameState.status === GameStatus.RESULTS || gameState.status === GameStatus.JUDGING || gameState.status === GameStatus.SCENARIO_GENERATION) {
+        if (gameState.status !== GameStatus.PLAYER_INPUT && gameState.status !== GameStatus.SCENARIO_GENERATION) {
+            // We keep it during input phase and scenario generation phase (as it arrives at the end of scenario gen)
+            if (gameState.status === GameStatus.RESULTS || gameState.status === GameStatus.JUDGING || gameState.status === GameStatus.LOBBY_WAITING) {
                 setSecretData(null);
                 setSecretViewed(false);
                 setIsSecretModalOpen(false);
@@ -751,21 +750,12 @@ const App: React.FC = () => {
     const [textRevealed, setTextRevealed] = useState(false);
 
     useEffect(() => {
-        let timeout: NodeJS.Timeout;
         if (gameState.status === GameStatus.PLAYER_INPUT) {
             setScenarioRevealed(false);
             setActionInput('');
-            // Delay reveal slightly for effect (auto-triggers CSS transitions)
-            timeout = setTimeout(() => {
-                setScenarioRevealed(true);
-            }, 800);
         } else if (gameState.status === GameStatus.RESULTS) {
             setTextRevealed(false);
-            timeout = setTimeout(() => {
-                setTextRevealed(true);
-            }, 800);
         }
-        return () => clearTimeout(timeout);
     }, [gameState.status]);
 
     const handleScenarioTap = () => {
@@ -796,13 +786,8 @@ const App: React.FC = () => {
 
     // -- Render Helpers --
 
-    const displayedScenario = scenarioRevealed
-        ? (gameState.scenario || '')
-        : (gameState.scenario ? gameState.scenario.substring(0, 50) + '...' : '');
-
-    const displayedText = textRevealed
-        ? (gameState.roundResult?.story || '')
-        : (gameState.roundResult?.story ? gameState.roundResult.story.substring(0, 50) + '...' : '');
+    const scenarioText = gameState.scenario || '';
+    const resultText = gameState.roundResult?.story || '';
 
     // -- Views --
 
@@ -938,13 +923,16 @@ const App: React.FC = () => {
                         </div>
                     )}
                     <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">{t('situation', lang)}</h3>
-                    <MarkdownDisplay content={displayedScenario} />
-                    {!scenarioRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
+                    <MarkdownDisplay
+                        content={scenarioRevealed ? scenarioText : scenarioText}
+                        animate={!scenarioRevealed}
+                        onAnimationComplete={() => setScenarioRevealed(true)}
+                    />
                 </div>
 
                 {/* Input Area - Fade in when revealed */}
-                {/* BLOCK INPUT IF SECRET NOT VIEWED */}
-                {secretData && !secretViewed ? (
+                {/* BLOCK INPUT IF SECRET NOT VIEWED - Only show this once the text is fully revealed */}
+                {scenarioRevealed && secretData && !secretViewed ? (
                     <div className="flex-grow flex flex-col items-center justify-center space-y-4 animate-pulse">
                         <div className="text-red-500 font-mono font-bold text-lg tracking-widest text-center animate-bounce">
                             {lang === 'ru' ? 'ВХОДЯЩЕЕ СООБЩЕНИЕ' : 'INCOMING TRANSMISSION'}
@@ -974,15 +962,19 @@ const App: React.FC = () => {
                         </div>
                     </div>
                 )}
-                <div className={`mt-4 pb-4 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                    {user?.status === 'ready' ? (
-                        <Button disabled className="bg-green-600 text-white">{t('actionSubmitted', lang)}</Button>
-                    ) : (
-                        <Button onClick={() => handleSubmitAction(false)} isLoading={loading}>
-                            {t('submit', lang)}
-                        </Button>
-                    )}
-                </div>
+
+                {/* Submit button wrapper */}
+                {!secretData || secretViewed ? (
+                    <div className={`mt-4 pb-4 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                        {user?.status === 'ready' ? (
+                            <Button disabled className="bg-green-600 text-white">{t('actionSubmitted', lang)}</Button>
+                        ) : (
+                            <Button onClick={() => handleSubmitAction(false)} isLoading={loading}>
+                                {t('submit', lang)}
+                            </Button>
+                        )}
+                    </div>
+                ) : null}
             </div>
         );
     }
@@ -1021,8 +1013,13 @@ const App: React.FC = () => {
                     className="bg-tg-secondaryBg p-5 rounded-2xl mb-6 shadow-lg border border-tg-hint/10 min-h-[200px]"
                     onClick={handleResultsTap}
                 >
-                    <MarkdownDisplay content={displayedText} />
-                    {!textRevealed && !gameState.resultsRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
+                    <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">{lang === 'ru' ? 'РЕЗУЛЬТАТ' : 'RESULT'}</h3>
+                    <MarkdownDisplay
+                        content={gameState.roundResult?.story || ''}
+                        animate={!textRevealed}
+                        onAnimationComplete={() => setTextRevealed(true)}
+                    />
+                    {!textRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
                 </div>
 
                 {/* Captain Show Button */}
