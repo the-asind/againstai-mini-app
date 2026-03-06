@@ -14,6 +14,16 @@ interface Lobby {
     players: Player[];
     status: GameStatus;
     settings: LobbySettings;
+    roundNumber: number;
+    currentRoundType: import('../../types').RoundType;
+    currentSpecialRoundType: import('../../types').SpecialRoundType;
+    bossSegments: number;
+    specialSegments: number;
+    nextRoundType: import('../../types').RoundType;
+    nextSpecialRoundType: import('../../types').SpecialRoundType;
+    playerStates: Record<string, import('../../types').PlayerState>;
+    phaseStartTime?: number;
+    gmNotes?: import('../../types').ServerGameState["gmNotes"]; // Added for persistence
     scenario: ScenarioResponse | null;
     scenarioImage?: string;
     scenarioAudio?: string;
@@ -69,11 +79,23 @@ export class LobbyService {
         player.status = 'waiting';
         player.isOnline = true; // Initially online
 
+        const initialPlayerStates: Record<string, import('../../types').PlayerState> = {
+            [player.id]: { inventory: [], status_effects: [] }
+        };
+
         this.lobbies.set(code, {
             lobbyCode: code,
             players: [player],
             status: GameStatus.LOBBY_WAITING,
             settings: settings,
+            roundNumber: 1,
+            currentRoundType: 'NORMAL',
+            currentSpecialRoundType: 'NONE',
+            bossSegments: 0,
+            specialSegments: 0,
+            nextRoundType: 'NORMAL',
+            nextSpecialRoundType: 'NONE',
+            playerStates: initialPlayerStates,
             scenario: null,
             geminiKeys: [],
             navyKeys: [],
@@ -110,6 +132,7 @@ export class LobbyService {
             player.status = 'waiting';
             player.isOnline = true;
             lobby.players.push(player);
+            lobby.playerStates[player.id] = { inventory: [], status_effects: [] };
         }
 
         this.trackSocket(player.id, socketId);
@@ -213,10 +236,14 @@ export class LobbyService {
             }, 100);
         });
 
+        console.log(`[DEV DEBUG] collectKeys finished. Responses: ${this.keyCollectors.get(code)?.size} / ${onlinePlayers} players.`);
         const collectedMap = this.keyCollectors.get(code);
         this.keyCollectors.delete(code);
 
-        if (!collectedMap) return;
+        if (!collectedMap) {
+            console.log(`[DEV DEBUG] collectedMap is undefined!`);
+            return;
+        }
 
         const geminiKeys: string[] = [];
         const navyKeys: string[] = [];
@@ -225,6 +252,7 @@ export class LobbyService {
         const captain = lobby.players.find(p => p.isCaptain);
         if (captain) {
             const capKeys = collectedMap.get(captain.id);
+            console.log(`[DEV DEBUG] Captain ID: ${captain.id}. Collected CapKeys:`, !!capKeys);
             if (capKeys) {
                 if (capKeys.gemini) geminiKeys.push(capKeys.gemini);
                 if (capKeys.navy) navyKeys.push(capKeys.navy);
@@ -364,6 +392,7 @@ export class LobbyService {
             }
 
             lobby.status = GameStatus.SCENARIO_GENERATION;
+            lobby.phaseStartTime = Date.now();
             this.emitUpdate(code);
 
             const keyManager = new KeyManager(lobby.geminiKeys[0], lobby.geminiKeys.slice(1));
@@ -495,7 +524,10 @@ export class LobbyService {
 
         this.emitUpdate(code);
 
-        const timeLimitMs = (lobby.settings.timeLimitSeconds || 120) * 1000;
+        const effectiveSeconds = lobby.currentSpecialRoundType === 'PANIC'
+            ? 15
+            : (lobby.settings.timeLimitSeconds || 120);
+        const timeLimitMs = effectiveSeconds * 1000;
 
         if (this.timers.has(code)) clearTimeout(this.timers.get(code)!);
 
@@ -514,6 +546,14 @@ export class LobbyService {
         if (!player) return;
 
         // CHEAT_DETECTOR is disabled: we no longer check for injection.
+
+        const effectiveCharLimit = lobby.currentSpecialRoundType === 'CHAR_LIMIT'
+            ? 50
+            : lobby.settings.charLimit;
+
+        if (action.length > effectiveCharLimit) {
+            action = action.substring(0, effectiveCharLimit);
+        }
 
         player.actionText = action;
         player.status = 'ready';
@@ -561,6 +601,43 @@ export class LobbyService {
 
         const keyManager = new KeyManager(lobby.geminiKeys[0], lobby.geminiKeys.slice(1));
 
+        // --- Phase 2: Unified Probability Wheel Calculation ---
+        // Increment segments for the next round
+        let nextBossSegments = lobby.bossSegments + CONFIG.GAME.BOSS_INCREMENT_PER_ROUND;
+        let nextSpecialSegments = lobby.specialSegments + CONFIG.GAME.SPECIAL_INCREMENT_PER_ROUND;
+
+        if (nextBossSegments + nextSpecialSegments > CONFIG.GAME.TOTAL_SEGMENTS) {
+            if (nextBossSegments > CONFIG.GAME.TOTAL_SEGMENTS) {
+                nextBossSegments = CONFIG.GAME.TOTAL_SEGMENTS;
+                nextSpecialSegments = 0;
+            } else {
+                nextSpecialSegments = CONFIG.GAME.TOTAL_SEGMENTS - nextBossSegments;
+            }
+        }
+
+        // Roll the wheel for the NEXT round
+        const roll = Math.random() * CONFIG.GAME.TOTAL_SEGMENTS;
+        let nextType: import('../../types').RoundType = 'NORMAL';
+        let nextSpecial: import('../../types').SpecialRoundType = 'NONE';
+
+        if (roll < nextBossSegments) {
+            nextType = 'BOSS_FIGHT';
+            nextBossSegments = 0; // Reset boss segments since it triggered
+        } else if (roll < nextBossSegments + nextSpecialSegments) {
+            nextType = 'SPECIAL';
+            nextSpecialSegments = 0; // Reset special segments since it triggered
+
+            // Pick random special round
+            const specialTypes: import('../../types').SpecialRoundType[] = ['BODY_SWAP', 'PANIC', 'CHAR_LIMIT'];
+            nextSpecial = specialTypes[Math.floor(Math.random() * specialTypes.length)];
+        }
+
+        lobby.bossSegments = nextBossSegments;
+        lobby.specialSegments = nextSpecialSegments;
+        lobby.nextRoundType = nextType;
+        lobby.nextSpecialRoundType = nextSpecial;
+        // ----------------------------------------------------
+
         try {
             const lang = lobby.settings.storyLanguage || 'en';
 
@@ -574,14 +651,27 @@ export class LobbyService {
                 }
             };
 
+            let judgingPlayers = lobby.players;
+            if (lobby.currentSpecialRoundType === 'BODY_SWAP' && lobby.players.length > 1) {
+                judgingPlayers = lobby.players.map((p, i, arr) => {
+                    const nextPlayer = arr[(i + 1) % arr.length];
+                    return {
+                        ...p,
+                        actionText: nextPlayer.actionText
+                    };
+                });
+            }
+
             const result = await GeminiService.judgeRound(
                 keyManager,
                 safeScenario,
-                lobby.players,
+                judgingPlayers,
                 lobby.settings.mode,
                 lobby.playerSecrets, // Pass secrets to judge
                 lang,
-                lobby.settings.aiModelLevel
+                lobby.settings.aiModelLevel,
+                lobby.playerStates,
+                lobby.nextRoundType // Inject next round type
             );
 
             // Image Generation (RESULTS)
@@ -663,6 +753,21 @@ export class LobbyService {
         lobby.geminiKeys = [];
         lobby.navyKeys = [];
         lobby.playerSecrets = undefined; // Clear secrets
+        lobby.roundNumber = 1;
+        lobby.currentRoundType = 'NORMAL';
+        lobby.currentSpecialRoundType = 'NONE';
+        lobby.bossSegments = 0;
+        lobby.specialSegments = 0;
+        lobby.nextRoundType = 'NORMAL';
+        lobby.nextSpecialRoundType = 'NONE';
+
+        // Reset playerStates
+        const newStates: Record<string, import('../../types').PlayerState> = {};
+        lobby.players.forEach(p => {
+            newStates[p.id] = { inventory: [], status_effects: [] };
+        });
+        lobby.playerStates = newStates;
+        lobby.gmNotes = undefined;
 
         lobby.resultsRevealed = false;
         lobby.players.forEach(p => {
@@ -674,6 +779,89 @@ export class LobbyService {
         this.emitUpdate(code);
     }
 
+    public async nextRound(code: string, playerId: string) {
+        if (!this.isCaptain(code, playerId)) return;
+        const lobby = this.lobbies.get(code)!;
+
+        // Atomic Guard: Ensure we're in RESULTS
+        if (lobby.status !== GameStatus.RESULTS) return;
+
+        lobby.roundNumber++;
+        lobby.currentRoundType = lobby.nextRoundType; // Transition into the rolled round
+        lobby.currentSpecialRoundType = lobby.nextSpecialRoundType;
+        lobby.status = GameStatus.SCENARIO_GENERATION;
+        lobby.phaseStartTime = Date.now();
+        lobby.resultsRevealed = false;
+
+        // Save gm notes from last result
+        if (lobby.roundResult?.gm_notes) {
+            lobby.gmNotes = lobby.roundResult.gm_notes;
+        }
+
+        // Apply player states from last judge if available
+        if (lobby.roundResult?.playerStates) {
+            lobby.playerStates = lobby.roundResult.playerStates;
+        }
+
+        lobby.players.forEach(p => {
+            p.status = 'waiting';
+            p.actionText = undefined;
+            p.loadingVote = null;
+        });
+
+        this.emitUpdate(code);
+
+        try {
+            const keyManager = new KeyManager(lobby.geminiKeys[0], lobby.geminiKeys.slice(1));
+            const lang = lobby.settings.storyLanguage || 'en';
+
+            const scenarioResponse = await GeminiService.generateScenario(
+                keyManager,
+                lobby.settings.mode,
+                lobby.settings.scenarioType,
+                lobby.players,
+                lang,
+                lobby.settings.aiModelLevel,
+                lobby.currentSpecialRoundType, // Pass current special round as twist string
+                null,
+                lobby.playerStates,
+                lobby.gmNotes,
+                lobby.currentRoundType
+            );
+
+            lobby.scenario = scenarioResponse;
+
+            if (scenarioResponse.secrets) {
+                lobby.playerSecrets = scenarioResponse.secrets;
+            } else {
+                const fallback: Record<string, string> = {};
+                lobby.players.forEach(p => fallback[p.id] = lang === 'ru' ? "Обычный день." : "An ordinary day.");
+                lobby.playerSecrets = fallback;
+            }
+
+            this.emitSecrets(code);
+
+            // Audio generation ... basically copy start logic if needed
+            if (lobby.settings.voiceoverScenario) {
+                if (lobby.navyKeys.length > 0) {
+                    const navyKeyManager = new KeyManager(lobby.navyKeys[0], lobby.navyKeys.slice(1));
+                    const voiceUrl = await VoiceService.generateVoice(navyKeyManager, scenarioResponse.scenario_text);
+                    if (voiceUrl) {
+                        lobby.scenarioAudio = voiceUrl;
+                    }
+                }
+            }
+
+            this.startRound(code);
+
+        } catch (e) {
+            console.error(`Lobby ${code} Next Round Error:`, e);
+            lobby.status = GameStatus.RESULTS; // Revert
+            this.io.to(code).emit('error', { message: "Failed to generate next round." });
+            this.emitUpdate(code);
+        }
+    }
+
     public emitUpdate(code: string) {
         const lobby = this.lobbies.get(code);
         if (lobby) {
@@ -683,6 +871,13 @@ export class LobbyService {
                 players: lobby.players, // Players object is safe (contains public info)
                 status: lobby.status,
                 settings: lobby.settings,
+                roundNumber: lobby.roundNumber,
+                currentRoundType: lobby.currentRoundType,
+                currentSpecialRoundType: lobby.currentSpecialRoundType,
+                bossSegments: lobby.bossSegments,
+                specialSegments: lobby.specialSegments,
+                playerStates: lobby.playerStates,
+                phaseStartTime: lobby.phaseStartTime,
                 scenario: lobby.scenario ? lobby.scenario.scenario_text : null,
                 scenarioImage: lobby.scenarioImage,
                 scenarioAudio: lobby.scenarioAudio,

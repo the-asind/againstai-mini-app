@@ -14,10 +14,10 @@ export const ImageService = {
           baseURL: "https://api.navy/v1",
         });
 
-        console.log(`[ImageService] Generating image with model: flux.2-dev`);
+        console.log(`[ImageService] Generating image with model: flux.2-klein`);
 
         const response = await openai.images.generate({
-          model: "flux.2-dev",
+          model: "flux.2-klein",
           prompt: promptText,
           n: 1,
           size: "16:9" as any, // Cast to any because standard OpenAI types might not include "16:9"

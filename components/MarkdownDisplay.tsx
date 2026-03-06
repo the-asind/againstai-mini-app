@@ -7,13 +7,15 @@ interface MarkdownDisplayProps {
   className?: string;
   animate?: boolean;
   onAnimationComplete?: () => void;
+  speedMultiplier?: number;
 }
 
 export const MarkdownDisplay: React.FC<MarkdownDisplayProps> = ({
   content,
   className = '',
   animate = false,
-  onAnimationComplete
+  onAnimationComplete,
+  speedMultiplier = 1
 }) => {
   const [displayedContent, setDisplayedContent] = useState(animate ? '' : content);
   const [isAnimating, setIsAnimating] = useState(animate);
@@ -40,7 +42,7 @@ export const MarkdownDisplay: React.FC<MarkdownDisplayProps> = ({
       } else {
         setDisplayedContent(content.substring(0, currentIndex));
       }
-    }, 20); // Fast interval
+    }, 20 * speedMultiplier); // Fast interval * multiplier
 
     return () => clearInterval(intervalId);
   }, [content, animate, onAnimationComplete]);

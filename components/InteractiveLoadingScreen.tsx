@@ -106,11 +106,11 @@ export const InteractiveLoadingScreen: React.FC<InteractiveLoadingScreenProps> =
       const randomOffset = (Math.random() * 0.9 + 0.05) * degPerSegment;
       const targetAngle = wheelConfig.targetIndex * degPerSegment + randomOffset;
 
-      const spins = 12; // Increased spins for more momentum
+      const spins = 35; // Increased spins for longer duration
       const finalRotation = spins * 360 + (360 - targetAngle);
 
       const controls = animate(wheelRotation, finalRotation, {
-        duration: 4.5, // much faster spin!
+        duration: 15, // spin to 15 seconds
         ease: [0.1, 0.9, 0.1, 1], // Custom curve for very slow tail
         onComplete: onWheelSpinComplete
       });
@@ -274,6 +274,20 @@ export const InteractiveLoadingScreen: React.FC<InteractiveLoadingScreenProps> =
     );
   };
 
+  const [displayTime, setDisplayTime] = React.useState(15);
+
+  useEffect(() => {
+    if (votingConfig?.deadlineMs) {
+      const updateTime = () => {
+        const remaining = Math.max(0, Math.ceil((votingConfig.deadlineMs - Date.now()) / 1000));
+        setDisplayTime(remaining);
+      };
+      updateTime();
+      const interval = setInterval(updateTime, 500);
+      return () => clearInterval(interval);
+    }
+  }, [votingConfig?.deadlineMs]);
+
   const renderVoting = () => {
     if (!votingConfig) return null;
 
@@ -295,7 +309,7 @@ export const InteractiveLoadingScreen: React.FC<InteractiveLoadingScreenProps> =
           </h2>
           <div className="flex items-center justify-center gap-2 text-tg-hint text-xs font-mono">
             <Timer size={14} />
-            {lang === 'ru' ? 'Осталось:' : 'Remaining:'} {votingConfig.timeLeft} {lang === 'ru' ? 'сек' : 'sec'}
+            {lang === 'ru' ? 'Осталось:' : 'Remaining:'} {displayTime} {lang === 'ru' ? 'сек' : 'sec'}
           </div>
         </div>
 

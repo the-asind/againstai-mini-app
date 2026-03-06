@@ -55,7 +55,9 @@ io.use((socket, next) => {
     // Development Bypass (Optional, remove for prod, but useful here if CONFIG.BOT_TOKEN is missing)
     if (!CONFIG.BOT_TOKEN && process.env.NODE_ENV !== 'production') {
         console.warn("DEV MODE: Skipping Auth Check due to missing token.");
-        socket.telegramUser = { id: 12345, first_name: "Dev", username: "dev" };
+
+        // Use a special DEV flag indicating this socket is fully trusted because we're in dev mode
+        socket.telegramUser = { id: 0, first_name: "Dev", username: "dev", isDevBypass: true } as any;
         return next();
     }
 
@@ -116,7 +118,8 @@ io.on('connection', (socket) => {
 
     socket.on('create_lobby', ({ player, settings }: { player: Player, settings: LobbySettings }, callback) => {
         // Security Check: Ensure the player object ID matches the authenticated user ID
-        if (player.id !== user.id.toString()) {
+        // Skip in dev mode to allow local multi-client testing
+        if (!(user as any).isDevBypass && player.id !== user.id.toString()) {
             if (callback) callback({ error: "Identity mismatch" });
             return;
         }
@@ -132,7 +135,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('join_lobby', ({ code, player }: { code: string, player: Player }, callback) => {
-        if (player.id !== user.id.toString()) {
+        if (!(user as any).isDevBypass && player.id !== user.id.toString()) {
             if (callback) callback({ error: "Identity mismatch" });
             return;
         }
@@ -147,50 +150,70 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('update_settings', ({ code, settings }: { code: string, settings: Partial<LobbySettings> }) => {
-        if (lobbyService.isCaptain(code, user.id.toString())) {
-            lobbyService.updateSettings(code, user.id.toString(), settings);
+    socket.on('update_settings', ({ code, settings, playerId }: { code: string, settings: Partial<LobbySettings>, playerId?: string }) => {
+        const pid = ((user as any).isDevBypass && playerId) ? playerId : user.id.toString();
+        if (lobbyService.isCaptain(code, pid)) {
+            lobbyService.updateSettings(code, pid, settings);
         }
     });
 
-    socket.on('update_player', ({ code, updates }: { code: string, updates: Partial<Player> }) => {
+    socket.on('update_player', ({ code, updates, playerId }: { code: string, updates: Partial<Player>, playerId?: string }) => {
         // Any player can update their OWN data
-        lobbyService.updatePlayer(code, user.id.toString(), updates);
+        const pid = ((user as any).isDevBypass && playerId) ? playerId : user.id.toString();
+        lobbyService.updatePlayer(code, pid, updates);
     });
 
     // Handle client responding to 'request_keys' event
-    socket.on('provide_keys', ({ code, keys }: { code: string, keys: { gemini?: string, navy?: string } }) => {
+    socket.on('provide_keys', ({ code, keys, playerId }: { code: string, keys: { gemini?: string, navy?: string }, playerId?: string }) => {
         // Security Check: Ensure user is actually in the lobby
-        if (lobbyService.isPlayerInLobby(code, user.id.toString())) {
-            lobbyService.receiveKeys(code, user.id.toString(), keys);
+        const pid = ((user as any).isDevBypass && playerId) ? playerId : user.id.toString();
+        // DEBUG LOG
+        console.log(`[DEV DEBUG] provide_keys from pid: ${pid}, lobby: ${code}. Has Gemini: ${!!keys.gemini}, Has Navy: ${!!keys.navy}`);
+
+        if (lobbyService.isPlayerInLobby(code, pid)) {
+            lobbyService.receiveKeys(code, pid, keys);
+        } else {
+            console.log(`[DEV DEBUG] provide_keys REJECTED - Player ${pid} is not in lobby ${code}.`);
         }
     });
 
-    socket.on('get_aggregate_navy_usage', ({ code }: { code: string }) => {
-        if (lobbyService.isCaptain(code, user.id.toString())) {
-            lobbyService.getAggregateNavyUsage(code, user.id.toString());
+    socket.on('get_aggregate_navy_usage', ({ code, playerId }: { code: string, playerId?: string }) => {
+        const pid = ((user as any).isDevBypass && playerId) ? playerId : user.id.toString();
+        if (lobbyService.isCaptain(code, pid)) {
+            lobbyService.getAggregateNavyUsage(code, pid);
         }
     });
 
-    socket.on('start_game', ({ code }: { code: string }) => {
-        if (lobbyService.isCaptain(code, user.id.toString())) {
-            lobbyService.startGame(code, user.id.toString());
+    socket.on('start_game', ({ code, playerId }: { code: string, playerId?: string }) => {
+        const pid = ((user as any).isDevBypass && playerId) ? playerId : user.id.toString();
+        if (lobbyService.isCaptain(code, pid)) {
+            lobbyService.startGame(code, pid);
         }
     });
 
-    socket.on('submit_action', ({ code, action }: { code: string, action: string }) => {
-        lobbyService.submitAction(code, user.id.toString(), action);
+    socket.on('submit_action', ({ code, action, playerId }: { code: string, action: string, playerId?: string }) => {
+        const pid = ((user as any).isDevBypass && playerId) ? playerId : user.id.toString();
+        lobbyService.submitAction(code, pid, action);
     });
 
-    socket.on('reveal_results', ({ code }: { code: string }) => {
-        if (lobbyService.isCaptain(code, user.id.toString())) {
-            lobbyService.revealResults(code, user.id.toString());
+    socket.on('reveal_results', ({ code, playerId }: { code: string, playerId?: string }) => {
+        const pid = ((user as any).isDevBypass && playerId) ? playerId : user.id.toString();
+        if (lobbyService.isCaptain(code, pid)) {
+            lobbyService.revealResults(code, pid);
         }
     });
 
-    socket.on('reset_game', ({ code }: { code: string }) => {
-        if (lobbyService.isCaptain(code, user.id.toString())) {
-            lobbyService.resetGame(code, user.id.toString());
+    socket.on('reset_game', ({ code, playerId }: { code: string, playerId?: string }) => {
+        const pid = ((user as any).isDevBypass && playerId) ? playerId : user.id.toString();
+        if (lobbyService.isCaptain(code, pid)) {
+            lobbyService.resetGame(code, pid);
+        }
+    });
+
+    socket.on('next_round', ({ code, playerId }: { code: string, playerId?: string }) => {
+        const pid = ((user as any).isDevBypass && playerId) ? playerId : user.id.toString();
+        if (lobbyService.isCaptain(code, pid)) {
+            lobbyService.nextRound(code, pid);
         }
     });
 
