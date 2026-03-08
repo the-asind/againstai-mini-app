@@ -22,6 +22,15 @@ const getKeyCount = (): 0 | 1 | 2 => {
     return count as 0 | 1 | 2;
 };
 
+const getSeedFromCode = (code: string | null): number => {
+    let seed = 0;
+    const s = code || "";
+    for (let i = 0; i < s.length; i++) {
+        seed += s.charCodeAt(i);
+    }
+    return seed;
+};
+
 // Extracted Components
 
 interface SettingsModalProps {
@@ -462,7 +471,7 @@ const App: React.FC = () => {
         const timeBlock = state.phaseStartTime ? Math.floor(state.phaseStartTime / 20000) : Math.floor(Date.now() / 20000);
 
         const questions = lang === 'ru' ? WHO_IS_MOST_LIKELY_QUESTIONS_RU : WHO_IS_MOST_LIKELY_QUESTIONS_EN;
-        const seed = Array.from(state.lobbyCode || "").reduce((a, b) => a + b.charCodeAt(0), 0) + timeBlock;
+        const seed = getSeedFromCode(state.lobbyCode) + timeBlock;
         const randomQuestion = questions[seed % questions.length];
 
         // Clear local vote first
@@ -525,7 +534,7 @@ const App: React.FC = () => {
         if (loadingPhase === 'WHEEL' && !wheelConfig) {
             setLoadingText(lang === 'ru' ? 'Выбор сценария...' : 'Selecting scenario...');
             // TODO: Fetch real wheel config from server
-            const seed = Array.from(gameState.lobbyCode || "").reduce((a, b) => a + b.charCodeAt(0), 0) + gameState.roundNumber;
+            const seed = getSeedFromCode(gameState.lobbyCode) + gameState.roundNumber;
             setWheelConfig({
                 segments: [
                     { type: 'NORMAL', label: lang === 'ru' ? 'Обычный' : 'Normal', color: '#2EA05E', probability: 0.7 },
