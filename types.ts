@@ -117,7 +117,6 @@ export interface ServerGameState {
   gmNotes?: {
     hidden_threat_logic: string;
     solution_clues: string;
-    sanity_check: string;
   };
   scenario: ScenarioResponse | null; // Full object with secrets
   scenarioImage?: string;
@@ -158,7 +157,6 @@ export interface RoundResult {
   gm_notes: {
     hidden_threat_logic: string;
     solution_clues: string;
-    sanity_check: string;
     next_round_telegraph?: string;
   };
   game_over?: boolean; // Used by Boss Judge to signal the end of the game
@@ -228,12 +226,11 @@ declare global {
 
 export interface ScenarioResponse {
   gm_notes: {
-    hidden_threat_logic: string;
+    hidden_threat_logic?: string;
     solution_clues: string;
-    sanity_check: string;
   };
   scenario_text: string;
-  secrets?: Record<string, string>; // Map<playerId, secretText>
+  secrets?: string[]; // Array of secretText matching players array order
 }
 
 export interface NavyUsageResponse {

@@ -156,15 +156,20 @@ export const GeminiService = {
                 type: Type.OBJECT,
                 properties: {
                   hidden_threat_logic: { type: Type.STRING },
-                  solution_clues: { type: Type.STRING },
-                  sanity_check: { type: Type.STRING }
-                }
+                  solution_clues: { type: Type.STRING }
+                },
+                propertyOrdering: ["hidden_threat_logic", "solution_clues"],
+                required: ["solution_clues"]
               },
               scenario_text: { type: Type.STRING },
-              secrets: { type: Type.OBJECT } // For dynamic player_id keys
+              secrets: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              }
             },
-            required: ["scenario_text", "gm_notes", "secrets"]
-          }
+            propertyOrdering: ["gm_notes", "scenario_text", "secrets"],
+            required: ["gm_notes", "scenario_text", "secrets"]
+          } as any
         }
       });
 
@@ -183,8 +188,7 @@ export const GeminiService = {
           scenario_text: text,
           gm_notes: {
             hidden_threat_logic: "Unknown",
-            solution_clues: "Unknown",
-            sanity_check: "Unknown"
+            solution_clues: "Unknown"
           }
         };
       }
@@ -226,8 +230,7 @@ export const GeminiService = {
       playerStates: playerStates || {},
       gm_notes: {
         hidden_threat_logic: "Связь потеряна.",
-        solution_clues: "Связь потеряна.",
-        sanity_check: "Связь потеряна."
+        solution_clues: "Связь потеряна."
       }
     };
 
@@ -301,7 +304,6 @@ export const GeminiService = {
                   properties: {
                     hidden_threat_logic: { type: Type.STRING },
                     solution_clues: { type: Type.STRING },
-                    sanity_check: { type: Type.STRING },
                     next_round_telegraph: { type: Type.STRING }
                   }
                 }
