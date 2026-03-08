@@ -8,18 +8,18 @@ export const CONFIG = {
   BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
   // Default models if not specified in env
   MODELS: {
-    FAST: process.env.GEMINI_MODEL_FAST || 'gemini-3-flash-preview',
+    FAST: process.env.GEMINI_MODEL_FAST || 'gemini-3.1-flash-lite-preview',
     SMART: process.env.GEMINI_MODEL_SMART || 'gemini-3.1-pro-preview',
     IMAGE: process.env.GEMINI_MODEL_IMAGE || 'gemini-2.5-flash-image'
   },
   // AI Levels
   AI_LEVELS: {
     economy: {
-      FAST: process.env.AI_LEVEL_1_FAST || 'gemini-2.5-flash-lite-preview-09-2025',
-      SMART: process.env.AI_LEVEL_1_SMART || 'gemini-2.5-flash-lite-preview-09-2025'
+      FAST: process.env.AI_LEVEL_1_FAST || 'gemini-3.1-flash-lite-preview',
+      SMART: process.env.AI_LEVEL_1_SMART || 'gemini-3.1-flash-lite-preview'
     },
     balanced: {
-      FAST: process.env.AI_LEVEL_2_FAST || 'gemini-3-flash-preview',
+      FAST: process.env.AI_LEVEL_2_FAST || 'gemini-3.1-flash-lite-preview',
       SMART: process.env.AI_LEVEL_2_SMART || 'gemini-3-flash-preview'
     },
     premium: {

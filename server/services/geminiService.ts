@@ -147,7 +147,7 @@ export const GeminiService = {
         config: {
           // Enable Reasoning for Gemini 3
           // @ts-ignore - Ignore type error if SDK version is slightly older
-          thinkingConfig: modelName.includes('gemini-3') ? { thinkingLevel: "low" } : undefined,
+          thinkingConfig: modelName.includes('gemini-3') ? { thinkingLevel: "high" } : undefined,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -155,11 +155,12 @@ export const GeminiService = {
               gm_notes: {
                 type: Type.OBJECT,
                 properties: {
-                  hidden_threat_logic: { type: Type.STRING },
-                  solution_clues: { type: Type.STRING }
+                  threat_logic: { type: Type.STRING },
+                  solution_clues: { type: Type.STRING },
+                  sanity_check: { type: Type.STRING },
                 },
-                propertyOrdering: ["hidden_threat_logic", "solution_clues"],
-                required: ["solution_clues"]
+                propertyOrdering: ["threat_logic", "solution_clues", "sanity_check"],
+                required: ["threat_logic", "solution_clues", "sanity_check"]
               },
               scenario_text: { type: Type.STRING },
               secrets: {
@@ -187,8 +188,9 @@ export const GeminiService = {
         return {
           scenario_text: text,
           gm_notes: {
-            hidden_threat_logic: "Unknown",
-            solution_clues: "Unknown"
+            threat_logic: "Unknown",
+            solution_clues: "Unknown",
+            sanity_check: "Unknown"
           }
         };
       }
