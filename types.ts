@@ -2,6 +2,7 @@ export type Language = 'en' | 'ru';
 
 export type LoadingPhase = 'WHEEL' | 'SHOW_RESULT' | 'VOTING' | 'VOTING_RESULTS';
 export type RoundType = 'NORMAL' | 'SPECIAL' | 'BOSS_FIGHT';
+export type SpecialRoundType = 'NONE' | 'BODY_SWAP' | 'PANIC' | 'CHAR_LIMIT';
 
 export interface WheelConfig {
   segments: {
@@ -17,7 +18,7 @@ export interface VotingConfig {
   question: string;
   candidates: Omit<Player, 'status' | 'actionText'>[];
   myVoteId: string | null;
-  timeLeft: number;
+  deadlineMs: number;
 }
 
 export interface VotingResults {
@@ -52,7 +53,8 @@ export enum GameStatus {
   SCENARIO_GENERATION = 'SCENARIO_GENERATION',
   PLAYER_INPUT = 'PLAYER_INPUT',
   JUDGING = 'JUDGING',
-  RESULTS = 'RESULTS'
+  RESULTS = 'RESULTS',
+  EPILOGUE = 'EPILOGUE'
 }
 
 export enum ImageGenerationMode {
@@ -72,6 +74,7 @@ export interface Player {
   keyCount: 0 | 1 | 2; // Stricter type: 0, 1, or 2
   navyUsage?: { tokens: number; plan?: string };
   loadingVote?: string | null;
+  nextRoundVote?: 'continue' | 'lobby' | null; // BG3-style intent vote
 }
 
 export enum AIModelLevel {
@@ -93,12 +96,28 @@ export interface LobbySettings {
   voiceoverResults: boolean;
 }
 
+export interface PlayerState {
+  inventory: string[];
+  status_effects: string[];
+}
+
 // Internal Server State (Has secrets)
 export interface ServerGameState {
   lobbyCode: string | null;
   players: Player[];
   status: GameStatus;
   settings: LobbySettings;
+  roundNumber: number;
+  currentRoundType: RoundType; // Added for Phase 2
+  currentSpecialRoundType?: SpecialRoundType; // Added for Phase 3
+  bossSegments: number; // Added for Phase 2
+  specialSegments: number; // Added for Phase 2
+  playerStates: Record<string, PlayerState>;
+  phaseStartTime?: number;
+  gmNotes?: {
+    hidden_threat_logic: string;
+    solution_clues: string;
+  };
   scenario: ScenarioResponse | null; // Full object with secrets
   scenarioImage?: string;
   scenarioAudio?: string;
@@ -115,6 +134,14 @@ export interface GameState {
   players: Player[];
   status: GameStatus;
   settings: LobbySettings;
+  roundNumber: number;
+  currentRoundType: RoundType; // Added for Phase 2
+  currentSpecialRoundType?: SpecialRoundType; // Added for Phase 3
+  bossSegments: number; // Added for Phase 2
+  specialSegments: number; // Added for Phase 2
+  wheelConfig?: WheelConfig; // Current active wheel configuration
+  playerStates: Record<string, PlayerState>;
+  phaseStartTime?: number;
   scenario: string | null; // Just the text!
   scenarioImage?: string;
   scenarioAudio?: string;
@@ -126,6 +153,13 @@ export interface RoundResult {
   story: string;
   survivors: string[]; // IDs of survivors
   deaths: { playerId: string; reason: string }[];
+  playerStates: Record<string, PlayerState>; // AI updates this each round
+  gm_notes: {
+    hidden_threat_logic: string;
+    solution_clues: string;
+    next_round_telegraph?: string;
+  };
+  game_over?: boolean; // Used by Boss Judge to signal the end of the game
   image?: string; // Optional generated image for results
   audio?: string; // Optional generated audio for results
 }
@@ -192,13 +226,11 @@ declare global {
 
 export interface ScenarioResponse {
   gm_notes: {
-    analysis: string;
-    hidden_threat_logic: string;
+    hidden_threat_logic?: string;
     solution_clues: string;
-    sanity_check: string;
   };
   scenario_text: string;
-  secrets?: Record<string, string>; // Map<playerId, secretText>
+  secrets?: string[]; // Array of secretText matching players array order
 }
 
 export interface NavyUsageResponse {

@@ -15,16 +15,22 @@ export const CONFIG = {
   // AI Levels
   AI_LEVELS: {
     economy: {
-        FAST: process.env.AI_LEVEL_1_FAST || 'gemini-2.5-flash-lite-preview-09-2025',
-        SMART: process.env.AI_LEVEL_1_SMART || 'gemini-2.5-flash-lite-preview-09-2025'
+      FAST: process.env.AI_LEVEL_1_FAST || 'gemini-2.5-flash-lite-preview-09-2025',
+      SMART: process.env.AI_LEVEL_1_SMART || 'gemini-2.5-flash-lite-preview-09-2025'
     },
     balanced: {
-        FAST: process.env.AI_LEVEL_2_FAST || 'gemini-3-flash-preview',
-        SMART: process.env.AI_LEVEL_2_SMART || 'gemini-3-flash-preview'
+      FAST: process.env.AI_LEVEL_2_FAST || 'gemini-3-flash-preview',
+      SMART: process.env.AI_LEVEL_2_SMART || 'gemini-3-flash-preview'
     },
     premium: {
-        FAST: process.env.AI_LEVEL_3_FAST || 'gemini-3-flash-preview',
-        SMART: process.env.AI_LEVEL_3_SMART || 'gemini-3.1-pro-preview'
+      FAST: process.env.AI_LEVEL_3_FAST || 'gemini-3-flash-preview',
+      SMART: process.env.AI_LEVEL_3_SMART || 'gemini-3.1-pro-preview'
     }
+  },
+  // Game Logic
+  GAME: {
+    TOTAL_SEGMENTS: 20,
+    BOSS_INCREMENT_PER_ROUND: parseInt(process.env.BOSS_INCREMENT_PER_ROUND || '2', 10),
+    SPECIAL_INCREMENT_PER_ROUND: parseInt(process.env.SPECIAL_INCREMENT_PER_ROUND || '3', 10)
   }
 };

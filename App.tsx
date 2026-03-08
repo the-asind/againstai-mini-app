@@ -204,6 +204,11 @@ const App: React.FC = () => {
         players: [],
         status: GameStatus.HOME,
         settings: initialSettings,
+        roundNumber: 1,
+        currentRoundType: 'NORMAL',
+        bossSegments: 0,
+        specialSegments: 0,
+        playerStates: {},
         scenario: null,
         resultsRevealed: false
     });
@@ -285,8 +290,16 @@ const App: React.FC = () => {
 
             // Auto-create player object from Telegram Data or Mock
             const userObj = window.Telegram?.WebApp?.initDataUnsafe?.user;
+
+            // Generate or retrieve a random ID for this browser session to allow local multi-client testing
+            let fallbackId = localStorage.getItem(STORAGE_KEYS.DEV_ID);
+            if (!fallbackId) {
+                fallbackId = Math.random().toString(36).substr(2, 9);
+                localStorage.setItem(STORAGE_KEYS.DEV_ID, fallbackId);
+            }
+
             const newPlayer: Player = {
-                id: userObj?.id?.toString() || Math.random().toString(36).substr(2, 9), // Fallback ID
+                id: userObj?.id?.toString() || fallbackId,
                 name: savedNick || userObj?.first_name || "Player_" + Math.floor(Math.random() * 1000),
                 isCaptain: false, // Will be set by server on create
                 status: 'waiting',
@@ -296,6 +309,9 @@ const App: React.FC = () => {
             };
             setUser(newPlayer);
             userIdRef.current = newPlayer.id; // Important for immediate socket auth
+
+            // Fast Hydration for SocketService on refresh
+            SocketService.setCurrentPlayer(newPlayer);
         };
 
         // Socket Subscriptions
@@ -341,17 +357,16 @@ const App: React.FC = () => {
 
     // 2. Connection Monitor Effect (Separate to avoid re-initializing app)
     useEffect(() => {
-        const checkConnection = setInterval(() => {
-            const connected = SocketService.isConnected();
-            if (connected !== isSocketConnected) {
-                setIsSocketConnected(connected);
-            }
-        }, 1000);
+        // Initial sync
+        setIsSocketConnected(SocketService.isConnected());
+
+        // Subscribe to connection changes (event-driven)
+        const unsubscribe = SocketService.subscribeToConnection(setIsSocketConnected);
 
         return () => {
-            clearInterval(checkConnection);
+            unsubscribe();
         };
-    }, [isSocketConnected]);
+    }, []);
 
     // Auto-Join Effect
     useEffect(() => {
@@ -450,9 +465,13 @@ const App: React.FC = () => {
         setLoadingText(lang === 'ru' ? 'Сбор протоколов...' : 'Collecting protocols...');
 
         const state = gameStateRef.current;
-        // Determine Question Deterministically
+        // Determine Question Deterministically using a time block (every 20s = new block)
+        // This ensures all clients who arrive at this phase within the same 20s window get the exact same question
+        // regardless of local sequence desync, because they share the same lobbyCode and the same time block.
+        const timeBlock = state.phaseStartTime ? Math.floor(state.phaseStartTime / 20000) : Math.floor(Date.now() / 20000);
+
         const questions = lang === 'ru' ? WHO_IS_MOST_LIKELY_QUESTIONS_RU : WHO_IS_MOST_LIKELY_QUESTIONS_EN;
-        const seed = getSeedFromCode(state.lobbyCode) + voteRoundRef.current;
+        const seed = getSeedFromCode(state.lobbyCode) + timeBlock;
         const randomQuestion = questions[seed % questions.length];
 
         // Clear local vote first
@@ -460,25 +479,23 @@ const App: React.FC = () => {
             SocketService.updatePlayer(state.lobbyCode, { loadingVote: null });
         }
 
+        // Wheel 15s + 3s wait + 15s voting = 33 seconds total duration for the phase
+        const phaseStart = state.phaseStartTime || Date.now();
+        const deadlineMs = phaseStart + 33000;
+
         setVotingConfig({
             question: randomQuestion,
             candidates: state.players,
             myVoteId: null,
-            timeLeft: 15
+            deadlineMs: deadlineMs
         });
 
         clearInterval(votingTimerRef.current);
         votingTimerRef.current = setInterval(() => {
-            setVotingConfig(prev => {
-                if (!prev) return prev;
-                // Since this runs every 1000ms, when it hits 1, we change to 0 and end phase next tick or now
-                if (prev.timeLeft <= 1) {
-                    clearInterval(votingTimerRef.current);
-                    endVotingPhase(gameStateRef.current);
-                    return prev;
-                }
-                return { ...prev, timeLeft: prev.timeLeft - 1 };
-            });
+            if (Date.now() >= deadlineMs) {
+                clearInterval(votingTimerRef.current);
+                endVotingPhase(gameStateRef.current);
+            }
         }, 1000);
     }, [lang, endVotingPhase]);
 
@@ -494,11 +511,22 @@ const App: React.FC = () => {
         }, 3000);
     }, [lang, startVotingPhase]);
 
-    // Loading Screen Orchestration initiation and cleanup
+    // Reset Loading Screen state on new round
     useEffect(() => {
-        if (gameState.status !== GameStatus.SCENARIO_GENERATION) {
+        if (gameState.status === GameStatus.SCENARIO_GENERATION) {
+            setLoadingPhase('WHEEL');
+            setWheelConfig(undefined);
+            setVotingConfig(undefined);
+            setVotingResults(undefined);
+        } else {
             clearTimeout(sequenceTimeoutRef.current);
             clearInterval(votingTimerRef.current);
+        }
+    }, [gameState.status, gameState.roundNumber]);
+
+    // Loading Screen Orchestration initiation
+    useEffect(() => {
+        if (gameState.status !== GameStatus.SCENARIO_GENERATION) {
             return;
         }
 
@@ -506,7 +534,7 @@ const App: React.FC = () => {
         if (loadingPhase === 'WHEEL' && !wheelConfig) {
             setLoadingText(lang === 'ru' ? 'Выбор сценария...' : 'Selecting scenario...');
             // TODO: Fetch real wheel config from server
-            const seed = getSeedFromCode(gameState.lobbyCode);
+            const seed = getSeedFromCode(gameState.lobbyCode) + gameState.roundNumber;
             setWheelConfig({
                 segments: [
                     { type: 'NORMAL', label: lang === 'ru' ? 'Обычный' : 'Normal', color: '#2EA05E', probability: 0.7 },
@@ -517,7 +545,7 @@ const App: React.FC = () => {
             });
             // The wheel component will take care of the animation duration, then call handleWheelSpinComplete locally inside App.tsx render via prop
         }
-    }, [gameState.status, loadingPhase, wheelConfig, lang, gameState.lobbyCode]);
+    }, [gameState.status, loadingPhase, wheelConfig, lang, gameState.lobbyCode, gameState.roundNumber]);
 
     // Fast-forward effect if everyone has voted
     useEffect(() => {
@@ -531,10 +559,9 @@ const App: React.FC = () => {
 
     // Reset Secret Data on Round End
     useEffect(() => {
-        if (gameState.status !== GameStatus.PLAYER_INPUT) {
-            // If we leave player input, reset secret state
-            // We keep it during input phase
-            if (gameState.status === GameStatus.RESULTS || gameState.status === GameStatus.JUDGING || gameState.status === GameStatus.SCENARIO_GENERATION) {
+        if (gameState.status !== GameStatus.PLAYER_INPUT && gameState.status !== GameStatus.SCENARIO_GENERATION) {
+            // We keep it during input phase and scenario generation phase (as it arrives at the end of scenario gen)
+            if (gameState.status === GameStatus.RESULTS || gameState.status === GameStatus.JUDGING || gameState.status === GameStatus.LOBBY_WAITING) {
                 setSecretData(null);
                 setSecretViewed(false);
                 setIsSecretModalOpen(false);
@@ -543,6 +570,10 @@ const App: React.FC = () => {
     }, [gameState.status]);
 
     // -- Handlers --
+
+    const handleScenarioAnimationComplete = useCallback(() => {
+        setScenarioRevealed(true);
+    }, []);
 
     const handleSaveSettings = () => {
         if (!settingsNick.trim()) {
@@ -664,7 +695,8 @@ const App: React.FC = () => {
         try {
             // If socket not connected, wait for it?
             // SocketService.createLobby handles connection internally
-            await SocketService.createLobby(user, gameState.settings);
+            const code = await SocketService.createLobby(user, gameState.settings);
+            SocketService.setCurrentLobbyCode(code);
         } catch (e: any) {
             setToast({ msg: e.message || "Failed", type: 'error' });
         } finally {
@@ -688,7 +720,11 @@ const App: React.FC = () => {
         setLoading(true);
         try {
             const success = await SocketService.joinLobby(code, user);
-            if (!success) setToast({ msg: t('lobbyNotFound', lang), type: 'error' });
+            if (success) {
+                SocketService.setCurrentLobbyCode(code);
+            } else {
+                setToast({ msg: t('lobbyNotFound', lang), type: 'error' });
+            }
         } catch (e: any) {
             setToast({ msg: e.message || "Failed", type: 'error' });
         } finally {
@@ -755,26 +791,38 @@ const App: React.FC = () => {
         setToast({ msg: t('linkCopied', lang), type: 'success' });
     };
 
+    const handleActionVote = (vote: 'continue' | 'lobby') => {
+        if (!gameState.lobbyCode) return;
+        if (user?.isCaptain) {
+            // Captain explicitly executes the action
+            if (vote === 'continue') {
+                SocketService.nextRound(gameState.lobbyCode);
+            } else {
+                SocketService.resetGame(gameState.lobbyCode);
+            }
+        } else {
+            // Non-captain click registers a vote
+            SocketService.updatePlayer(gameState.lobbyCode, { nextRoundVote: vote });
+
+            // Optimistically update local UI for immediate feedback
+            setGameState(prev => ({
+                ...prev,
+                players: prev.players.map(p => p.id === user?.id ? { ...p, nextRoundVote: vote } : p)
+            }));
+        }
+    };
+
     // Interactions
     const [scenarioRevealed, setScenarioRevealed] = useState(false);
     const [textRevealed, setTextRevealed] = useState(false);
 
     useEffect(() => {
-        let timeout: NodeJS.Timeout;
         if (gameState.status === GameStatus.PLAYER_INPUT) {
             setScenarioRevealed(false);
             setActionInput('');
-            // Delay reveal slightly for effect (auto-triggers CSS transitions)
-            timeout = setTimeout(() => {
-                setScenarioRevealed(true);
-            }, 800);
         } else if (gameState.status === GameStatus.RESULTS) {
             setTextRevealed(false);
-            timeout = setTimeout(() => {
-                setTextRevealed(true);
-            }, 800);
         }
-        return () => clearTimeout(timeout);
     }, [gameState.status]);
 
     const handleScenarioTap = () => {
@@ -805,13 +853,8 @@ const App: React.FC = () => {
 
     // -- Render Helpers --
 
-    const displayedScenario = scenarioRevealed
-        ? (gameState.scenario || '')
-        : (gameState.scenario ? gameState.scenario.substring(0, 50) + '...' : '');
-
-    const displayedText = textRevealed
-        ? (gameState.roundResult?.story || '')
-        : (gameState.roundResult?.story ? gameState.roundResult.story.substring(0, 50) + '...' : '');
+    const scenarioText = gameState.scenario || '';
+    const resultText = gameState.roundResult?.story || '';
 
     // -- Views --
 
@@ -947,13 +990,17 @@ const App: React.FC = () => {
                         </div>
                     )}
                     <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">{t('situation', lang)}</h3>
-                    <MarkdownDisplay content={displayedScenario} />
-                    {!scenarioRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
+                    <MarkdownDisplay
+                        content={scenarioRevealed ? scenarioText : scenarioText}
+                        animate={!scenarioRevealed}
+                        onAnimationComplete={handleScenarioAnimationComplete}
+                        speedMultiplier={gameState.currentSpecialRoundType === 'PANIC' ? 2 : 1}
+                    />
                 </div>
 
                 {/* Input Area - Fade in when revealed */}
-                {/* BLOCK INPUT IF SECRET NOT VIEWED */}
-                {secretData && !secretViewed ? (
+                {/* BLOCK INPUT IF SECRET NOT VIEWED - Only show this once the text is fully revealed */}
+                {scenarioRevealed && secretData && !secretViewed ? (
                     <div className="flex-grow flex flex-col items-center justify-center space-y-4 animate-pulse">
                         <div className="text-red-500 font-mono font-bold text-lg tracking-widest text-center animate-bounce">
                             {lang === 'ru' ? 'ВХОДЯЩЕЕ СООБЩЕНИЕ' : 'INCOMING TRANSMISSION'}
@@ -975,23 +1022,32 @@ const App: React.FC = () => {
                             value={actionInput}
                             onChange={(e) => handleActionInputChange(e.target.value)}
                             disabled={!scenarioRevealed || user?.status === 'ready'}
-                            maxLength={gameState.settings.charLimit}
+                            maxLength={gameState.currentSpecialRoundType === 'CHAR_LIMIT' ? 50 : gameState.settings.charLimit}
+                            onKeyDown={(e) => {
+                                if (gameState.currentSpecialRoundType === 'PANIC' && (e.key === 'Backspace' || e.key === 'Delete')) {
+                                    e.preventDefault();
+                                }
+                            }}
                         />
                         <div className="flex justify-between text-xs text-tg-hint px-1">
-                            <span>{actionInput.length} / {gameState.settings.charLimit}</span>
+                            <span>{actionInput.length} / {gameState.currentSpecialRoundType === 'CHAR_LIMIT' ? 50 : gameState.settings.charLimit}</span>
                             {errorMsg && <span className="text-red-500 font-bold">{errorMsg}</span>}
                         </div>
                     </div>
                 )}
-                <div className={`mt-4 pb-4 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                    {user?.status === 'ready' ? (
-                        <Button disabled className="bg-green-600 text-white">{t('actionSubmitted', lang)}</Button>
-                    ) : (
-                        <Button onClick={() => handleSubmitAction(false)} isLoading={loading}>
-                            {t('submit', lang)}
-                        </Button>
-                    )}
-                </div>
+
+                {/* Submit button wrapper */}
+                {!secretData || secretViewed ? (
+                    <div className={`mt-4 pb-4 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                        {user?.status === 'ready' ? (
+                            <Button disabled className="bg-green-600 text-white">{t('actionSubmitted', lang)}</Button>
+                        ) : (
+                            <Button onClick={() => handleSubmitAction(false)} isLoading={loading}>
+                                {t('submit', lang)}
+                            </Button>
+                        )}
+                    </div>
+                ) : null}
             </div>
         );
     }
@@ -1010,7 +1066,7 @@ const App: React.FC = () => {
         );
     }
 
-    if (gameState.status === GameStatus.RESULTS && gameState.roundResult) {
+    if ((gameState.status === GameStatus.RESULTS || gameState.status === GameStatus.EPILOGUE) && gameState.roundResult) {
         return (
             <div className="min-h-screen flex flex-col p-4">
                 <h2 className="text-3xl font-black mb-6 text-center">{t('results', lang)}</h2>
@@ -1030,8 +1086,13 @@ const App: React.FC = () => {
                     className="bg-tg-secondaryBg p-5 rounded-2xl mb-6 shadow-lg border border-tg-hint/10 min-h-[200px]"
                     onClick={handleResultsTap}
                 >
-                    <MarkdownDisplay content={displayedText} />
-                    {!textRevealed && !gameState.resultsRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
+                    <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">{lang === 'ru' ? 'РЕЗУЛЬТАТ' : 'RESULT'}</h3>
+                    <MarkdownDisplay
+                        content={gameState.roundResult?.story || ''}
+                        animate={!textRevealed}
+                        onAnimationComplete={() => setTextRevealed(true)}
+                    />
+                    {!textRevealed && <span className="animate-pulse inline-block w-2 h-4 bg-tg-button ml-1 align-middle"></span>}
                 </div>
 
                 {/* Captain Show Button */}
@@ -1064,11 +1125,64 @@ const App: React.FC = () => {
                     </div>
                 )}
 
-                {gameState.resultsRevealed && (
-                    <Button onClick={handleRestart} className="mt-auto mb-6">
-                        {t('playAgain', lang)}
-                    </Button>
-                )}
+                {gameState.resultsRevealed && (() => {
+                    const allDead = gameState.players.length > 0 && gameState.players.every(p => gameState.roundResult?.deaths.some(d => d.playerId === p.id));
+
+                    return (
+                        <div className="mt-auto mb-6 space-y-4">
+                            <div className="flex flex-col space-y-4">
+                                {/* Continue Story Button Wrapper */}
+                                {gameState.status !== GameStatus.EPILOGUE && !allDead && (
+                                    <div className="relative">
+                                        <Button
+                                            onClick={() => handleActionVote('continue')}
+                                            className={`w-full ${user?.nextRoundVote === 'continue' ? 'ring-2 ring-tg-button' : ''}`}
+                                            disabled={!user?.isCaptain && user?.nextRoundVote === 'continue'}
+                                        >
+                                            {lang === 'ru' ? 'Продолжить историю' : 'Continue Story'}
+                                        </Button>
+                                        {/* Avatars of players who voted 'continue' */}
+                                        <div className="absolute right-2 -top-3 flex -space-x-2">
+                                            {gameState.players.filter(p => p.nextRoundVote === 'continue').map(p => (
+                                                p.avatarUrl ? (
+                                                    <img key={p.id} src={p.avatarUrl} alt={p.name} className="w-8 h-8 rounded-full border-2 border-tg-bg bg-tg-secondaryBg object-cover" />
+                                                ) : (
+                                                    <div key={p.id} className="w-8 h-8 rounded-full border-2 border-tg-bg bg-tg-button flex items-center justify-center text-[10px] font-bold text-white uppercase">
+                                                        {p.name.charAt(0)}
+                                                    </div>
+                                                )
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Return to Lobby Button Wrapper */}
+                                <div className="relative mt-2">
+                                    <Button
+                                        onClick={() => handleActionVote('lobby')}
+                                        variant="secondary"
+                                        className={`w-full ${user?.nextRoundVote === 'lobby' ? 'ring-2 ring-tg-button' : ''}`}
+                                        disabled={!user?.isCaptain && user?.nextRoundVote === 'lobby'}
+                                    >
+                                        {lang === 'ru' ? 'Вернуться в лобби' : 'Return to Lobby'}
+                                    </Button>
+                                    {/* Avatars of players who voted 'lobby' */}
+                                    <div className="absolute right-2 -top-3 flex -space-x-2">
+                                        {gameState.players.filter(p => p.nextRoundVote === 'lobby').map(p => (
+                                            p.avatarUrl ? (
+                                                <img key={p.id} src={p.avatarUrl} alt={p.name} className="w-8 h-8 rounded-full border-2 border-tg-bg bg-tg-secondaryBg object-cover" />
+                                            ) : (
+                                                <div key={p.id} className="w-8 h-8 rounded-full border-2 border-tg-bg bg-tg-button flex items-center justify-center text-[10px] font-bold text-white uppercase">
+                                                    {p.name.charAt(0)}
+                                                </div>
+                                            )
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })()}
             </div>
         );
     }

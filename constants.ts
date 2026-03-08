@@ -12,7 +12,7 @@ export const DEFAULT_SETTINGS = {
 
 export const MIN_TIME = 30;
 export const MAX_TIME = 600;
-export const MIN_CHARS = 100;
+export const MIN_CHARS = 1;
 export const MAX_CHARS = 3000;
 
 export const STORAGE_KEYS = {
@@ -20,5 +20,6 @@ export const STORAGE_KEYS = {
     NAVY_KEY: 'against_ai_navy_key',
     NICKNAME: 'against_ai_nickname',
     SETTINGS: 'against_ai_lobby_settings',
-    LANG: 'against_ai_ui_lang'
+    LANG: 'against_ai_ui_lang',
+    DEV_ID: 'against_ai_dev_id'
 };

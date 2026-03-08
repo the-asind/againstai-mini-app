@@ -34,6 +34,24 @@ const retryWithBackoffSingle = async <T>(
   }
 };
 
+// Utility to extract JSON from potentially messy AI text
+const extractJSON = (text: string): any => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch (innerErr) {
+        // Return null so the caller can fallback
+        return null;
+      }
+    }
+    return null;
+  }
+};
+
 export const GeminiService = {
   /**
    * Validates if the API Key is working by making a lightweight call.
@@ -68,7 +86,10 @@ export const GeminiService = {
     language: Language = 'en',
     aiLevel: AIModelLevel = AIModelLevel.BALANCED,
     twistType: string = "NONE",
-    chosenPlayerId: string | null = null
+    chosenPlayerId: string | null = null,
+    playerStates?: Record<string, import('../../types').PlayerState>,
+    previousGmNotes?: import('../../types').ServerGameState["gmNotes"],
+    currentRoundType: import('../../types').RoundType = 'NORMAL'
   ): Promise<ScenarioResponse> => {
 
     return keyManager.executeWithRetry(async (apiKey) => {
@@ -83,8 +104,14 @@ export const GeminiService = {
 
       // Prepare variables
       const playerCount = players.length;
-      const playersJson = JSON.stringify(players.map(p => ({ id: p.id, name: p.name })));
+      const playersJson = JSON.stringify(players.map(p => ({
+        id: p.id,
+        name: p.name,
+        inventory: playerStates?.[p.id]?.inventory || [],
+        status_effects: playerStates?.[p.id]?.status_effects || []
+      })));
       const playersList = players.map(p => p.name).join(", ");
+      const prevGmNotesStr = previousGmNotes ? JSON.stringify(previousGmNotes) : "Нет (Первый раунд)";
 
       const scenarioTypes = SYSTEM_INSTRUCTIONS.SCENARIO_TYPES as Record<string, string>;
       let typeInstruction = scenarioTypes[type];
@@ -95,10 +122,15 @@ export const GeminiService = {
         typeInstruction = scenarioTypes[randomKey];
       }
 
-      const prompt = SYSTEM_INSTRUCTIONS.SCENARIO_GENERATOR
+      const basePrompt = currentRoundType === 'BOSS_FIGHT'
+        ? SYSTEM_INSTRUCTIONS.BOSS_GENERATOR
+        : SYSTEM_INSTRUCTIONS.SCENARIO_GENERATOR;
+
+      const prompt = basePrompt
         .replace('{{PLAYER_COUNT}}', playerCount.toString())
         .replace('{{PLAYERS_JSON}}', playersJson)
         .replace('{{PLAYERS}}', playersList)
+        .replace('{{PREVIOUS_GM_NOTES}}', prevGmNotesStr)
         .replace('{{LANGUAGE}}', language === 'ru' ? 'Russian' : 'English')
         .replace('{{THEME}}', typeInstruction)
         .replace('{{ROLE}}', role)
@@ -113,6 +145,9 @@ export const GeminiService = {
         model: modelName,
         contents: prompt,
         config: {
+          // Enable Reasoning for Gemini 3
+          // @ts-ignore - Ignore type error if SDK version is slightly older
+          thinkingConfig: modelName.includes('gemini-3') ? { thinkingLevel: "low" } : undefined,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -120,37 +155,40 @@ export const GeminiService = {
               gm_notes: {
                 type: Type.OBJECT,
                 properties: {
-                  analysis: { type: Type.STRING },
                   hidden_threat_logic: { type: Type.STRING },
-                  solution_clues: { type: Type.STRING },
-                  sanity_check: { type: Type.STRING }
-                }
+                  solution_clues: { type: Type.STRING }
+                },
+                propertyOrdering: ["hidden_threat_logic", "solution_clues"],
+                required: ["solution_clues"]
               },
               scenario_text: { type: Type.STRING },
-              secrets: { type: Type.OBJECT } // For dynamic player_id keys
+              secrets: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              }
             },
-            required: ["scenario_text", "gm_notes", "secrets"]
-          }
+            propertyOrdering: ["gm_notes", "scenario_text", "secrets"],
+            required: ["gm_notes", "scenario_text", "secrets"]
+          } as any
         }
       });
 
       const text = response.text;
       if (!text) throw new Error("Empty response from AI");
 
-      console.log(`[Gemini Response] Output: ${text.substring(0, 200)}...`);
+      console.log(`\n================== [GEMINI RAW OUTPUT: SCENARIO & SECRETS] ==================\n${text}\n=============================================================================\n`);
 
       try {
-        const jsonResponse = JSON.parse(text) as ScenarioResponse;
-        return jsonResponse;
+        const jsonResponse = extractJSON(text);
+        if (!jsonResponse) throw new Error("Could not extract JSON");
+        return jsonResponse as ScenarioResponse;
       } catch (parseError) {
         console.warn("Gemini returned non-JSON text, falling back to raw text wrap.");
         return {
           scenario_text: text,
           gm_notes: {
-            analysis: "Failed to parse JSON",
             hidden_threat_logic: "Unknown",
-            solution_clues: "Unknown",
-            sanity_check: "Unknown"
+            solution_clues: "Unknown"
           }
         };
       }
@@ -177,7 +215,9 @@ export const GeminiService = {
     mode: GameMode,
     playerSecrets?: Record<string, string>, // Optional context
     language: Language = 'en',
-    aiLevel: AIModelLevel = AIModelLevel.BALANCED
+    aiLevel: AIModelLevel = AIModelLevel.BALANCED,
+    playerStates?: Record<string, import('../../types').PlayerState>,
+    nextRoundType: import('../../types').RoundType = 'NORMAL'
   ): Promise<RoundResult> => {
 
     // Fallback Result in case all retries fail
@@ -186,7 +226,12 @@ export const GeminiService = {
         ? "Связь с ИИ потеряна. Система экстренно завершает симуляцию."
         : "Connection to AI lost. The system is aborting the simulation.",
       survivors: players.map(p => p.id),
-      deaths: []
+      deaths: [],
+      playerStates: playerStates || {},
+      gm_notes: {
+        hidden_threat_logic: "Связь потеряна.",
+        solution_clues: "Связь потеряна."
+      }
     };
 
     try {
@@ -205,9 +250,11 @@ export const GeminiService = {
         }));
 
         // Replace placeholders in JUDGE_BASE
+        const playerStatesStr = playerStates ? JSON.stringify(playerStates, null, 2) : "{}";
         let prompt = SYSTEM_INSTRUCTIONS.JUDGE_BASE
           .replace('{{SCENARIO_TEXT}}', JSON.stringify(scenario, null, 2))
           .replace('{{PLAYER_ACTIONS_JSON}}', JSON.stringify(inputs, null, 2))
+          .replace('{{PLAYER_STATES_JSON}}', playerStatesStr)
           .replace('{{PLAYER_SECRETS_JSON}}', JSON.stringify(playerSecrets || {}, null, 2))
           .replace('{{GAME_MODE}}', modeInstruction);
 
@@ -218,6 +265,13 @@ export const GeminiService = {
 
               ${prompt}
             `;
+
+        if (nextRoundType === 'BOSS_FIGHT') {
+          const telegraphInstruction = language === 'ru'
+            ? "\n\n[SYSTEM OVERRIDE]: Следующий раунд гарантированно будет битвой с могущественным БОССОМ. Финализируя историю этого раунда, ОБЯЗАТЕЛЬНО добавь в самый конец повествования (в поле story) нагнетающий тизер/предвестие приближения ужасающего Босса. Опиши признаки его появления, звуки или визуальные эффекты, чтобы игроки поняли: худшее впереди. Кратко продублируй суть тизера в поле gm_notes.next_round_telegraph."
+            : "\n\n[SYSTEM OVERRIDE]: The next round is guaranteed to be a BOSS FIGHT. When finalizing the story for this round, you MUST append a suspenseful teaser/omen of the terrifying Boss's arrival at the very end of the 'story' field. Describe signs of its approach, sounds, or visual effects so players know the worst is yet to come. Briefly duplicate the essence of this teaser in the 'gm_notes.next_round_telegraph' field.";
+          prompt += telegraphInstruction;
+        }
 
         console.log(`[Gemini Request] Model: ${modelName}, Task: JUDGE_BASE`);
 
@@ -243,9 +297,18 @@ export const GeminiService = {
                       reason: { type: Type.STRING }
                     }
                   }
+                },
+                playerStates: { type: Type.OBJECT },
+                gm_notes: {
+                  type: Type.OBJECT,
+                  properties: {
+                    hidden_threat_logic: { type: Type.STRING },
+                    solution_clues: { type: Type.STRING },
+                    next_round_telegraph: { type: Type.STRING }
+                  }
                 }
               },
-              required: ["story", "survivors", "deaths"]
+              required: ["story", "survivors", "deaths", "playerStates", "gm_notes"]
             }
           }
         });
@@ -253,7 +316,11 @@ export const GeminiService = {
         const text = response.text;
         if (!text) throw new Error("Empty response from AI");
 
-        return JSON.parse(text) as RoundResult;
+        console.log(`\n================== [GEMINI RAW OUTPUT: JUDGE ROUND] ==================\n${text}\n======================================================================\n`);
+
+        const jsonResponse = extractJSON(text);
+        if (!jsonResponse) throw new Error("Could not extract JSON from Judge");
+        return jsonResponse as RoundResult;
       });
     } catch (error) {
       console.error("Gemini Judge Error (All retries failed):", error);
