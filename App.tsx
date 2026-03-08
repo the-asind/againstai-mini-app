@@ -348,17 +348,16 @@ const App: React.FC = () => {
 
     // 2. Connection Monitor Effect (Separate to avoid re-initializing app)
     useEffect(() => {
-        const checkConnection = setInterval(() => {
-            const connected = SocketService.isConnected();
-            if (connected !== isSocketConnected) {
-                setIsSocketConnected(connected);
-            }
-        }, 1000);
+        // Initial sync
+        setIsSocketConnected(SocketService.isConnected());
+
+        // Subscribe to connection changes (event-driven)
+        const unsubscribe = SocketService.subscribeToConnection(setIsSocketConnected);
 
         return () => {
-            clearInterval(checkConnection);
+            unsubscribe();
         };
-    }, [isSocketConnected]);
+    }, []);
 
     // Auto-Join Effect
     useEffect(() => {

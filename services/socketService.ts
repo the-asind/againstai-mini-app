@@ -8,6 +8,7 @@ type GameStateCallback = (state: GameState) => void;
 type ErrorCallback = (error: { message: string }) => void;
 type NavyAggregateCallback = (data: { totalTokens: number, contributors: number }) => void;
 type SecretCallback = (data: { secret: string }) => void;
+type ConnectionCallback = (connected: boolean) => void;
 
 class SocketServiceImpl {
     private socket: Socket | null = null;
@@ -15,6 +16,7 @@ class SocketServiceImpl {
     private errorSubscribers: ErrorCallback[] = [];
     private navyAggregateSubscribers: NavyAggregateCallback[] = [];
     private secretSubscribers: SecretCallback[] = [];
+    private connectionSubscribers: ConnectionCallback[] = [];
 
     // Session State for Reconnection
     private currentLobbyCode: string | null = null;
@@ -41,6 +43,7 @@ class SocketServiceImpl {
         });
 
         this.socket.on('connect', () => {
+            this.notifyConnectionSubscribers(true);
             // Auto-rejoin if session exists (e.g. after temporary disconnect)
             if (this.currentLobbyCode && this.currentPlayer) {
                 console.log("Reconnecting to lobby:", this.currentLobbyCode);
@@ -51,8 +54,13 @@ class SocketServiceImpl {
             }
         });
 
+        this.socket.on('disconnect', () => {
+            this.notifyConnectionSubscribers(false);
+        });
+
         this.socket.on('connect_error', (err) => {
             console.error("Socket Connection Error:", err.message);
+            this.notifyConnectionSubscribers(false);
         });
 
         this.socket.on('game_state', (state: GameState) => {
@@ -112,6 +120,13 @@ class SocketServiceImpl {
         this.secretSubscribers.push(callback);
         return () => {
             this.secretSubscribers = this.secretSubscribers.filter(s => s !== callback);
+        };
+    }
+
+    public subscribeToConnection(callback: ConnectionCallback): () => void {
+        this.connectionSubscribers.push(callback);
+        return () => {
+            this.connectionSubscribers = this.connectionSubscribers.filter(s => s !== callback);
         };
     }
 
@@ -236,6 +251,10 @@ class SocketServiceImpl {
 
     private notifySecretSubscribers(data: { secret: string }) {
         this.secretSubscribers.forEach(callback => callback(data));
+    }
+
+    private notifyConnectionSubscribers(connected: boolean) {
+        this.connectionSubscribers.forEach(callback => callback(connected));
     }
 }
 
