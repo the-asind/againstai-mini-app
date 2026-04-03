@@ -5,8 +5,10 @@ import { GameMode, ScenarioType, Player, RoundResult, Language, AIModelLevel, Sc
 import { ABSTRACT_ROLES } from "../archetypes/roles";
 import { ABSTRACT_INCIDENTS } from "../archetypes/incidents";
 import { ABSTRACT_TWISTS } from "../archetypes/twists";
+import { getRandomSeedWord } from "../archetypes/words";
 import { KeyManager } from "../utils/keyManager";
 import { isTransientError } from "../utils/errorUtils";
+import logger, { logAiResult } from '../utils/logger';
 
 // We rely on the global fetch patch (initialized in server/index.ts) to handle proxying
 const getClient = (apiKey: string) => new GoogleGenAI({ apiKey: apiKey.trim() });
@@ -73,7 +75,7 @@ export const GeminiService = {
 
       return !!response.text;
     } catch (e: any) {
-      console.error(`API Key Validation Failed for model ${CONFIG.MODELS.FAST}:`, e.message || e);
+      logger.error(`API Key Validation Failed for model ${CONFIG.MODELS.FAST}: ${e.message || e}`);
       return false;
     }
   },
@@ -96,6 +98,27 @@ export const GeminiService = {
       const ai = getClient(apiKey);
       const modelName = getModelName(aiLevel, 'SMART');
 
+      const isFirstRound = !previousGmNotes;
+      const seedWord = getRandomSeedWord();
+
+      if (process.env.MOCK_AI === 'true') {
+        const scenarioTypes = SYSTEM_INSTRUCTIONS.SCENARIO_TYPES as Record<string, string>;
+        let typeInstruction = scenarioTypes[type] || type;
+        if (type === ScenarioType.ANY) {
+          typeInstruction = scenarioTypes[ScenarioType.ANY];
+        }
+        await new Promise(r => setTimeout(r, 16000));
+        return {
+          scenario_text: `[MOCK_AI] 🤖 Тестовый сценарий.\nРаунд: ${currentRoundType}\nТема: ${typeInstruction}\nРандомное слово: ${seedWord || 'mock'}\nПервый: ${isFirstRound}. Спец: ${twistType}\nИгроки: ${players.map(p => p.name).join(', ')}.`,
+          gm_notes: {
+            threat_logic: "[MOCK_AI] Логика угрозы: Это простой мокап.",
+            solution_clues: "[MOCK_AI] Подсказка: делайте что хотите, всё равно выживете.",
+            sanity_check: "[MOCK_AI] Проверка пройдена."
+          },
+          secrets: players.map((p) => `[MOCK_AI СЕКРЕТ] Для ${p.name}: Ты особенный! Никому не говори.`)
+        };
+      }
+
       // Randomizer Logic
       const role = ABSTRACT_ROLES[Math.floor(Math.random() * ABSTRACT_ROLES.length)];
       const incident = ABSTRACT_INCIDENTS[Math.floor(Math.random() * ABSTRACT_INCIDENTS.length)];
@@ -107,8 +130,8 @@ export const GeminiService = {
       const playersJson = JSON.stringify(players.map(p => ({
         id: p.id,
         name: p.name,
-        inventory: playerStates?.[p.id]?.inventory || [],
-        status_effects: playerStates?.[p.id]?.status_effects || []
+        inventory: isFirstRound ? [] : (playerStates?.[p.id]?.inventory || []),
+        status_effects: isFirstRound ? [] : (playerStates?.[p.id]?.status_effects || [])
       })));
       const playersList = players.map(p => p.name).join(", ");
       const prevGmNotesStr = previousGmNotes ? JSON.stringify(previousGmNotes) : "Нет (Первый раунд)";
@@ -117,14 +140,15 @@ export const GeminiService = {
       let typeInstruction = scenarioTypes[type];
 
       if (type === ScenarioType.ANY) {
-        const keys = Object.keys(scenarioTypes);
-        const randomKey = keys[Math.floor(Math.random() * keys.length)];
-        typeInstruction = scenarioTypes[randomKey];
+        // Use the base prompt for ANY from prompts.ts
+        typeInstruction = scenarioTypes[ScenarioType.ANY];
       }
 
       const basePrompt = currentRoundType === 'BOSS_FIGHT'
         ? SYSTEM_INSTRUCTIONS.BOSS_GENERATOR
-        : SYSTEM_INSTRUCTIONS.SCENARIO_GENERATOR;
+        : isFirstRound
+          ? SYSTEM_INSTRUCTIONS.SCENARIO_GENERATOR_1_ROUND
+          : SYSTEM_INSTRUCTIONS.SCENARIO_GENERATOR;
 
       const prompt = basePrompt
         .replace('{{PLAYER_COUNT}}', playerCount.toString())
@@ -134,12 +158,67 @@ export const GeminiService = {
         .replace('{{LANGUAGE}}', language === 'ru' ? 'Russian' : 'English')
         .replace('{{THEME}}', typeInstruction)
         .replace('{{ROLE}}', role)
+        .replace('{{RANDOM_SEED_WORD}}', seedWord)
         .replace('{{INCIDENT}}', incident)
         .replace('{{TWIST}}', twist)
         .replace('{{TWIST_TYPE}}', twistType)
         .replace('{{CHOSEN_PLAYER_ID}}', chosenPlayerId || "NULL");
 
-      console.log(`[Gemini Request] Model: ${modelName}, Task: SCENARIO_GENERATOR`);
+      logger.info(`[Gemini Request] Model: ${modelName}, Task: SCENARIO_GENERATOR`);
+
+      const responseSchema: any = {
+        type: Type.OBJECT,
+        properties: {
+          gm_notes: {
+            type: Type.OBJECT,
+            properties: {
+              threat_logic: { type: Type.STRING },
+              solution_clues: { type: Type.STRING },
+              sanity_check: { type: Type.STRING }
+            },
+            propertyOrdering: ["threat_logic", "solution_clues", "sanity_check"],
+            required: currentRoundType === 'BOSS_FIGHT' ? ["threat_logic", "solution_clues"] : ["threat_logic", "solution_clues", "sanity_check"]
+          },
+          scenario_text: { type: Type.STRING },
+          secrets: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING }
+          }
+        },
+        propertyOrdering: ["gm_notes", "scenario_text", "secrets"],
+        required: ["gm_notes", "scenario_text", "secrets"]
+      };
+
+      if (currentRoundType !== 'BOSS_FIGHT') {
+        let scratchpadProperties: any = {
+          idea_1_rejected: { type: Type.STRING },
+          idea_2_rejected: { type: Type.STRING },
+          final_idea: { type: Type.STRING },
+          mechanics: { type: Type.STRING }
+        };
+        let scratchpadOrdering: string[] = ["idea_1_rejected", "idea_2_rejected", "final_idea", "mechanics"];
+        let scratchpadRequired: string[] = ["idea_1_rejected", "idea_2_rejected", "final_idea", "mechanics"];
+
+        if (isFirstRound) {
+          scratchpadProperties = { step_back: { type: Type.STRING }, ...scratchpadProperties };
+          scratchpadOrdering = ["step_back", ...scratchpadOrdering];
+          scratchpadRequired = ["step_back", ...scratchpadRequired];
+        } else {
+          scratchpadProperties = { context_analysis: { type: Type.STRING }, ...scratchpadProperties };
+          scratchpadOrdering = ["context_analysis", ...scratchpadOrdering];
+          scratchpadRequired = ["context_analysis", ...scratchpadRequired];
+        }
+
+        responseSchema.properties.scratchpad = {
+          type: Type.OBJECT,
+          description: "Внутренний процесс рассуждения ИИ для отбрасывания банальных идей и поиска глубинных смыслов.",
+          properties: scratchpadProperties,
+          propertyOrdering: scratchpadOrdering,
+          required: scratchpadRequired
+        };
+        responseSchema.propertyOrdering = ["scratchpad", "gm_notes", "scenario_text", "secrets"];
+        responseSchema.required = ["scratchpad", "gm_notes", "scenario_text", "secrets"];
+      }
 
       const response = await ai.models.generateContent({
         model: modelName,
@@ -149,41 +228,21 @@ export const GeminiService = {
           // @ts-ignore - Ignore type error if SDK version is slightly older
           thinkingConfig: modelName.includes('gemini-3') ? { thinkingLevel: "low" } : undefined,
           responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              gm_notes: {
-                type: Type.OBJECT,
-                properties: {
-                  hidden_threat_logic: { type: Type.STRING },
-                  solution_clues: { type: Type.STRING }
-                },
-                propertyOrdering: ["hidden_threat_logic", "solution_clues"],
-                required: ["solution_clues"]
-              },
-              scenario_text: { type: Type.STRING },
-              secrets: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              }
-            },
-            propertyOrdering: ["gm_notes", "scenario_text", "secrets"],
-            required: ["gm_notes", "scenario_text", "secrets"]
-          } as any
+          responseSchema: responseSchema
         }
       });
 
       const text = response.text;
       if (!text) throw new Error("Empty response from AI");
 
-      console.log(`\n================== [GEMINI RAW OUTPUT: SCENARIO & SECRETS] ==================\n${text}\n=============================================================================\n`);
+      logAiResult(modelName, text);
 
       try {
         const jsonResponse = extractJSON(text);
         if (!jsonResponse) throw new Error("Could not extract JSON");
         return jsonResponse as ScenarioResponse;
       } catch (parseError) {
-        console.warn("Gemini returned non-JSON text, falling back to raw text wrap.");
+        logger.warn("Gemini returned non-JSON text, falling back to raw text wrap.");
         return {
           scenario_text: text,
           gm_notes: {
@@ -229,7 +288,7 @@ export const GeminiService = {
       deaths: [],
       playerStates: playerStates || {},
       gm_notes: {
-        hidden_threat_logic: "Связь потеряна.",
+        threat_logic: "Связь потеряна.",
         solution_clues: "Связь потеряна."
       }
     };
@@ -238,6 +297,23 @@ export const GeminiService = {
       return await keyManager.executeWithRetry(async (apiKey) => {
         const ai = getClient(apiKey);
         const modelName = getModelName(aiLevel, 'SMART');
+
+        if (process.env.MOCK_AI === 'true') {
+          await new Promise(r => setTimeout(r, 3000));
+          const isBossNext = nextRoundType === 'BOSS_FIGHT';
+          return {
+            story: `[MOCK_AI] 🏆 Тестовые результаты.\nДействия: ${players.map(p => p.actionText).join(', ')}.\nИгроки выжили.`,
+            survivors: players.map(p => p.id),
+            deaths: [],
+            playerStates: playerStates || {},
+            gm_notes: {
+              threat_logic: "[MOCK_AI] Угроза успешно преодолена.",
+              solution_clues: "[MOCK_AI] Ждите следующий раунд.",
+              next_round_telegraph: isBossNext ? "[MOCK_AI ТИЗЕР БОССА] Грядет нечто ужасное!" : undefined
+            },
+            game_over: false
+          };
+        }
 
         const langInstruction = language === 'ru' ? "Write the story in RUSSIAN." : "Write the story in ENGLISH.";
         const gameModes = SYSTEM_INSTRUCTIONS.GAME_MODES as Record<string, string>;
@@ -273,7 +349,7 @@ export const GeminiService = {
           prompt += telegraphInstruction;
         }
 
-        console.log(`[Gemini Request] Model: ${modelName}, Task: JUDGE_BASE`);
+        logger.info(`[Gemini Request] Model: ${modelName}, Task: JUDGE_BASE`);
 
         const response = await ai.models.generateContent({
           model: modelName,
@@ -302,7 +378,7 @@ export const GeminiService = {
                 gm_notes: {
                   type: Type.OBJECT,
                   properties: {
-                    hidden_threat_logic: { type: Type.STRING },
+                    threat_logic: { type: Type.STRING },
                     solution_clues: { type: Type.STRING },
                     next_round_telegraph: { type: Type.STRING }
                   }
@@ -316,14 +392,14 @@ export const GeminiService = {
         const text = response.text;
         if (!text) throw new Error("Empty response from AI");
 
-        console.log(`\n================== [GEMINI RAW OUTPUT: JUDGE ROUND] ==================\n${text}\n======================================================================\n`);
+        logAiResult(modelName, text);
 
         const jsonResponse = extractJSON(text);
         if (!jsonResponse) throw new Error("Could not extract JSON from Judge");
         return jsonResponse as RoundResult;
       });
     } catch (error) {
-      console.error("Gemini Judge Error (All retries failed):", error);
+      logger.error(`Gemini Judge Error (All retries failed): ${error}`);
       return fallbackResult;
     }
   },
@@ -337,7 +413,7 @@ export const GeminiService = {
         const ai = getClient(apiKey);
         const modelName = CONFIG.MODELS.IMAGE;
 
-        console.log(`[Gemini Request] Image Gen Model: ${modelName}`);
+        logger.info(`[Gemini Request] Image Gen Model: ${modelName}`);
 
         const response = await ai.models.generateContent({
           model: modelName,
@@ -362,11 +438,11 @@ export const GeminiService = {
           }
         }
 
-        console.warn("Gemini Image Gen: No image data found in response.");
+        logger.warn("Gemini Image Gen: No image data found in response.");
         return null;
       });
     } catch (e: any) {
-      console.error("Gemini Image Gen Error:", e);
+      logger.error(`Gemini Image Gen Error: ${e}`);
       return null;
     }
   }

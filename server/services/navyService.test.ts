@@ -1,4 +1,4 @@
-import { expect, test, mock, describe, beforeEach, afterEach } from "bun:test";
+import { expect, test, describe, beforeEach, afterEach, vi } from 'vitest';
 import { NavyService } from "./navyService";
 
 // Helper to mock fetch responses based on key

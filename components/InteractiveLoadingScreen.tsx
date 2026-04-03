@@ -102,8 +102,8 @@ export const InteractiveLoadingScreen: React.FC<InteractiveLoadingScreenProps> =
     if (phase === 'WHEEL' && wheelConfig) {
       const degPerSegment = 360 / wheelConfig.segments.length;
 
-      // Random offset between 15% and 85% of the segment to avoid stopping exactly on a pin
-      const randomOffset = (Math.random() * 0.9 + 0.05) * degPerSegment;
+      // Deterministic offset using server-synced multiplier (5% to 95% of segment width)
+      const randomOffset = wheelConfig.randomOffsetMultiplier * degPerSegment;
       const targetAngle = wheelConfig.targetIndex * degPerSegment + randomOffset;
 
       const spins = 35; // Increased spins for longer duration
@@ -122,7 +122,14 @@ export const InteractiveLoadingScreen: React.FC<InteractiveLoadingScreenProps> =
   const targetSegment = wheelConfig?.segments[wheelConfig.targetIndex];
 
   const renderWheel = () => {
-    if (!wheelConfig) return null;
+    if (!wheelConfig) {
+      return (
+        <div className="fixed inset-0 flex flex-col items-center justify-center space-y-4 animate-fade-in">
+          <div className="w-12 h-12 border-4 border-game-accent border-t-transparent rounded-full animate-spin" />
+          <div className="text-game-accent font-mono text-sm tracking-widest animate-pulse uppercase">Awaiting GM Synchrony...</div>
+        </div>
+      );
+    }
 
     const { segments, targetIndex } = wheelConfig;
     const degPerSegment = 360 / segments.length; // 18 for 20 segments
@@ -150,9 +157,11 @@ export const InteractiveLoadingScreen: React.FC<InteractiveLoadingScreenProps> =
         className="fixed inset-0 flex flex-col items-center justify-start pt-16 md:pt-24 pointer-events-none"
       >
         <div className="text-center z-10 space-y-2 relative">
-          <h3 className="text-tg-button font-mono text-lg md:text-xl tracking-widest uppercase flex items-center justify-center gap-2">
-            <Crosshair size={20} />
-            {t('analyzing', lang) || "Анализ вероятностей"}
+          <h3 className="text-tg-button font-mono text-lg md:text-xl tracking-widest uppercase flex items-center justify-center gap-3">
+            <Crosshair size={22} className="shrink-0 animate-pulse text-game-accent" />
+            <span className="relative top-[0.5px] block">
+                {lang === 'ru' ? 'СИС.АНАЛИЗ' : 'SYS.ANALYSIS'}
+            </span>
           </h3>
           <p className="text-tg-hint text-xs md:text-sm font-mono">{loadingText}</p>
         </div>

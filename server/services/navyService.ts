@@ -1,4 +1,5 @@
 import { NavyUsageResponse } from "../../types";
+import logger from "../utils/logger";
 
 export type TaskType = 'VOICE' | 'IMAGE';
 
@@ -26,7 +27,7 @@ export class NavyService {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        console.warn(`[NavyService] Failed to fetch usage for key ending in ...${apiKey.slice(-4)}: ${response.status} ${response.statusText}`);
+        logger.warn(`[NavyService] Failed to fetch usage for key ending in ...${apiKey.slice(-4)}: ${response.status} ${response.statusText}`);
         return null;
       }
 
@@ -34,9 +35,9 @@ export class NavyService {
       return data;
     } catch (error: unknown) {
       if (error instanceof Error && error.name === 'AbortError') {
-          console.error(`[NavyService] Usage fetch timed out for key ending in ...${apiKey.slice(-4)}`);
+          logger.error(`[NavyService] Usage fetch timed out for key ending in ...${apiKey.slice(-4)}`);
       } else {
-          console.error(`[NavyService] Usage fetch error for key ending in ...${apiKey.slice(-4)}:`, error);
+          logger.error(`[NavyService] Usage fetch error for key ending in ...${apiKey.slice(-4)}: ${error}`);
       }
       return null;
     }
@@ -73,7 +74,7 @@ export class NavyService {
         if (stats) {
             usageMap.set(key, stats.usage.tokens_remaining_today);
         } else {
-            console.warn(`[NavyService] Excluding key ...${key.slice(-4)} due to usage check failure.`);
+            logger.warn(`[NavyService] Excluding key ...${key.slice(-4)} due to usage check failure.`);
         }
     }));
 
@@ -120,8 +121,8 @@ export class NavyService {
 
         while (attempt <= MAX_RETRIES_SAME_KEY) {
             try {
-                if (attempt > 0) console.log(`[NavyService] Retry attempt ${attempt} for key ...${key.slice(-4)}`);
-                console.log(`[NavyService] Attempting ${taskType} with key ...${key.slice(-4)} (${tokens} tokens)`);
+                if (attempt > 0) logger.info(`[NavyService] Retry attempt ${attempt} for key ...${key.slice(-4)}`);
+                logger.info(`[NavyService] Attempting ${taskType} with key ...${key.slice(-4)} (${tokens} tokens)`);
                 return await operation(key);
             } catch (error: unknown) {
                 lastError = error;
@@ -152,7 +153,7 @@ export class NavyService {
                 const isServerError = status >= 500;
 
                 if (isQuotaError) {
-                    console.warn(`[NavyService] Key ...${key.slice(-4)} failed with Quota/Rate Limit.`);
+                    logger.warn(`[NavyService] Key ...${key.slice(-4)} failed with Quota/Rate Limit.`);
 
                     if (taskType === 'VOICE') {
                         throw new Error(`Navy Voice generation failed: Best key exhausted quota (${tokens} tokens). Aborting per policy.`);
@@ -160,20 +161,20 @@ export class NavyService {
                     // For IMAGE: break retry loop to try next key
                     break;
                 } else if (isServerError) {
-                    console.warn(`[NavyService] Key ...${key.slice(-4)} failed with Server Error (5xx).`);
+                    logger.warn(`[NavyService] Key ...${key.slice(-4)} failed with Server Error (5xx).`);
                     attempt++;
                     if (attempt <= MAX_RETRIES_SAME_KEY) {
                         // Delay: 100ms, 200ms, 400ms (for tests/fast recovery)
                         const delay = Math.pow(2, attempt - 1) * 500;
-                        console.log(`[NavyService] Waiting ${delay}ms before retry...`);
+                        logger.info(`[NavyService] Waiting ${delay}ms before retry...`);
                         await new Promise(r => setTimeout(r, delay));
                         continue; // Retry same key
                     } else {
-                        console.warn(`[NavyService] Key ...${key.slice(-4)} exhausted 5xx retries. Trying next key...`);
+                        logger.warn(`[NavyService] Key ...${key.slice(-4)} exhausted 5xx retries. Trying next key...`);
                         break; // Try next key
                     }
                 } else {
-                    console.warn(`[NavyService] Key ...${key.slice(-4)} failed with error: ${message}.`);
+                    logger.warn(`[NavyService] Key ...${key.slice(-4)} failed with error: ${message}.`);
                     break; // Fatal error, try next key
                 }
             }

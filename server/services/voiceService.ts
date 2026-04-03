@@ -1,12 +1,17 @@
 import OpenAI from "openai";
 import { KeyManager } from "../utils/keyManager";
+import logger from "../utils/logger";
 import { saveAudio } from "../utils/fileStorage";
 
 export const VoiceService = {
   generateVoice: async (keyOrManager: KeyManager | string, text: string): Promise<string | null> => {
+    if (process.env.MOCK_AI === 'true') {
+        return null;
+    }
+    
     try {
         const operation = async (apiKey: string) => {
-            console.log(`[VoiceService] Generating voice for text length: ${text.length}`);
+            logger.info(`[VoiceService] Generating voice for text length: ${text.length}`);
             
             const openai = new OpenAI({
                 apiKey: apiKey,
@@ -21,7 +26,7 @@ export const VoiceService = {
 
             const buffer = Buffer.from(await mp3.arrayBuffer());
             const url = await saveAudio(buffer);
-            console.log(`[VoiceService] Voice generated: ${url}`);
+            logger.info(`[VoiceService] Voice generated: ${url}`);
             return url;
         };
 
@@ -30,8 +35,8 @@ export const VoiceService = {
         } else {
             return await keyOrManager.executeWithRetry(operation);
         }
-    } catch (e) {
-        console.error("Voice Generation Failed:", e);
+    } catch (e: any) {
+        logger.error(`Voice Generation Failed: ${e}`);
         return null;
     }
   }

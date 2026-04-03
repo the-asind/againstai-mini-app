@@ -108,7 +108,7 @@ export const MarkdownDisplay: React.FC<MarkdownDisplayProps> = ({
           tr: ({ node, ...props }) => <tr className="transition-colors hover:bg-tg-hint/5" {...props} />,
           th: ({ node, ...props }) => <th className="px-4 py-3 font-medium text-xs text-tg-hint uppercase tracking-wider whitespace-normal align-top" {...props} />,
           td: ({ node, ...props }) => <td className="px-4 py-3 text-tg-text whitespace-normal break-words align-top" {...props} />,
-        }}
+        } as any}
       >
         {displayedContent}
       </ReactMarkdown>

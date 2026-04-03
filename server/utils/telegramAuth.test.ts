@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { validateTelegramData } from './telegramAuth';
 import { CONFIG } from '../config';
 import crypto from 'node:crypto';

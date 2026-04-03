@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { KeyManager } from "../utils/keyManager";
+import logger from "../utils/logger";
 
 export const ImageService = {
   /**
@@ -7,6 +8,10 @@ export const ImageService = {
    * Returns the base64 string of the image.
    */
   generateImage: async (keyManager: KeyManager, promptText: string): Promise<string | null> => {
+    if (process.env.MOCK_AI === 'true') {
+        return null;
+    }
+    
     try {
       return await keyManager.executeWithRetry(async (apiKey) => {
         const openai = new OpenAI({
@@ -14,7 +19,7 @@ export const ImageService = {
           baseURL: "https://api.navy/v1",
         });
 
-        console.log(`[ImageService] Generating image with model: flux.2-klein`);
+        logger.info(`[ImageService] Generating image with model: flux.2-klein`);
 
         const response = await openai.images.generate({
           model: "flux.2-klein",
@@ -48,7 +53,7 @@ export const ImageService = {
         return `data:${contentType};base64,${base64}`;
       });
     } catch (e: any) {
-      console.error("Image Gen Error:", e);
+      logger.error(`Image Gen Error: ${e}`);
       return null;
     }
   }

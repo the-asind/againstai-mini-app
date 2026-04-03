@@ -1,4 +1,4 @@
-import { test, describe, expect, mock, spyOn } from 'bun:test';
+import { test, describe, expect, vi } from 'vitest';
 import { Player, GameMode, ScenarioType, GameStatus, ImageGenerationMode, AIModelLevel } from '../../types';
 import { join } from 'path';
 

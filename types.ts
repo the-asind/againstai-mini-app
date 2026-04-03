@@ -9,9 +9,10 @@ export interface WheelConfig {
     type: RoundType;
     label: string;
     color: string;
-    probability: number;
+    probability?: number;
   }[];
   targetIndex: number;
+  randomOffsetMultiplier: number; // For deterministic pseudo-random spin
 }
 
 export interface VotingConfig {
@@ -110,12 +111,14 @@ export interface ServerGameState {
   roundNumber: number;
   currentRoundType: RoundType; // Added for Phase 2
   currentSpecialRoundType?: SpecialRoundType; // Added for Phase 3
-  bossSegments: number; // Added for Phase 2
-  specialSegments: number; // Added for Phase 2
+  bossSegments: number; // Incrementing probabilities
+  specialSegments: number; // Incrementing probabilities
+  displayBossSegments: number; // Probabilities used for the CURRENT wheel roll
+  displaySpecialSegments: number; // Probabilities used for the CURRENT wheel roll
   playerStates: Record<string, PlayerState>;
   phaseStartTime?: number;
   gmNotes?: {
-    hidden_threat_logic: string;
+    threat_logic: string;
     solution_clues: string;
   };
   scenario: ScenarioResponse | null; // Full object with secrets
@@ -137,8 +140,10 @@ export interface GameState {
   roundNumber: number;
   currentRoundType: RoundType; // Added for Phase 2
   currentSpecialRoundType?: SpecialRoundType; // Added for Phase 3
-  bossSegments: number; // Added for Phase 2
-  specialSegments: number; // Added for Phase 2
+  bossSegments: number;
+  specialSegments: number;
+  displayBossSegments: number;
+  displaySpecialSegments: number;
   wheelConfig?: WheelConfig; // Current active wheel configuration
   playerStates: Record<string, PlayerState>;
   phaseStartTime?: number;
@@ -155,7 +160,7 @@ export interface RoundResult {
   deaths: { playerId: string; reason: string }[];
   playerStates: Record<string, PlayerState>; // AI updates this each round
   gm_notes: {
-    hidden_threat_logic: string;
+    threat_logic: string;
     solution_clues: string;
     next_round_telegraph?: string;
   };
@@ -226,7 +231,7 @@ declare global {
 
 export interface ScenarioResponse {
   gm_notes: {
-    hidden_threat_logic?: string;
+    threat_logic?: string;
     solution_clues: string;
   };
   scenario_text: string;

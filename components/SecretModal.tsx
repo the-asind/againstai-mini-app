@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Fingerprint, Lock, ShieldAlert } from 'lucide-react';
+import { Fingerprint, ShieldAlert } from 'lucide-react';
 import { MarkdownDisplay } from './MarkdownDisplay';
 
 interface SecretModalProps {
@@ -17,7 +17,7 @@ export const SecretModal: React.FC<SecretModalProps> = ({ secret, onClose, lang 
   // Use Ref to avoid resetting interval when onClose changes identity
   const onCloseRef = useRef(onClose);
   useEffect(() => {
-      onCloseRef.current = onClose;
+    onCloseRef.current = onClose;
   }, [onClose]);
 
   useEffect(() => {
@@ -57,11 +57,11 @@ export const SecretModal: React.FC<SecretModalProps> = ({ secret, onClose, lang 
         {/* Content */}
         <div className="p-6 relative">
           <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
-            <Lock size={120} />
+            <ShieldAlert size={120} />
           </div>
 
           <div className="relative z-10 min-h-[150px] flex items-center justify-center">
-             <MarkdownDisplay content={secret} className="text-center font-mono text-sm md:text-base leading-relaxed" />
+            <MarkdownDisplay content={secret} className="text-center font-mono text-sm md:text-base leading-relaxed" />
           </div>
         </div>
 
@@ -73,8 +73,8 @@ export const SecretModal: React.FC<SecretModalProps> = ({ secret, onClose, lang 
           >
             {/* Progress Bar Background */}
             <div
-                className="absolute inset-0 bg-red-600/20 origin-left transition-transform duration-100 ease-linear"
-                style={{ transform: `scaleX(${progress / 100})` }}
+              className="absolute inset-0 bg-red-600/20 origin-left transition-transform duration-100 ease-linear"
+              style={{ transform: `scaleX(${progress / 100})` }}
             />
 
             <div className="relative z-10 flex items-center justify-center gap-2 text-red-100 font-mono font-bold tracking-wider group-hover:text-white">
@@ -83,7 +83,7 @@ export const SecretModal: React.FC<SecretModalProps> = ({ secret, onClose, lang 
             </div>
           </button>
           <div className="text-center mt-2 text-[10px] text-red-500/50 font-mono">
-             {lang === 'ru' ? 'Сообщение будет удалено автоматически...' : 'Message will self-destruct...'}
+            {lang === 'ru' ? 'Сообщение будет удалено автоматически...' : 'Message will self-destruct...'}
           </div>
         </div>
       </motion.div>

@@ -12,7 +12,7 @@ import { LobbyView } from './components/LobbyView';
 import { InteractiveLoadingScreen } from './components/InteractiveLoadingScreen';
 import { WHO_IS_MOST_LIKELY_QUESTIONS_RU, WHO_IS_MOST_LIKELY_QUESTIONS_EN } from './server/poll';
 import { SecretModal } from './components/SecretModal';
-import { ShieldAlert } from 'lucide-react';
+import { ShieldAlert, Cpu, Terminal } from 'lucide-react';
 
 // Helper to count keys
 const getKeyCount = (): 0 | 1 | 2 => {
@@ -208,6 +208,9 @@ const App: React.FC = () => {
         currentRoundType: 'NORMAL',
         bossSegments: 0,
         specialSegments: 0,
+        displayBossSegments: 0,
+        displaySpecialSegments: 0,
+        wheelConfig: undefined,
         playerStates: {},
         scenario: null,
         resultsRevealed: false
@@ -243,9 +246,9 @@ const App: React.FC = () => {
     // --- Loading Screen State (SCENARIO_GENERATION) ---
     const [loadingPhase, setLoadingPhase] = useState<LoadingPhase>('WHEEL');
     const [loadingText, setLoadingText] = useState('');
-    const [wheelConfig, setWheelConfig] = useState<WheelConfig | undefined>();
     const [votingConfig, setVotingConfig] = useState<VotingConfig | undefined>();
     const [votingResults, setVotingResults] = useState<VotingResults | undefined>();
+    const [loadingSequenceActive, setLoadingSequenceActive] = useState(false);
 
     // Timer for the loading screen voting phase
     const votingTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
@@ -454,7 +457,10 @@ const App: React.FC = () => {
 
         // Wait 5s then restart voting
         sequenceTimeoutRef.current = setTimeout(() => {
-            if (gameStateRef.current.status !== GameStatus.SCENARIO_GENERATION) return;
+            if (gameStateRef.current.status !== GameStatus.SCENARIO_GENERATION) {
+                setLoadingSequenceActive(false);
+                return;
+            }
             voteRoundRef.current++;
             startVotingPhase();
         }, 5000);
@@ -507,6 +513,10 @@ const App: React.FC = () => {
         sequenceTimeoutRef.current = setTimeout(() => {
             if (gameStateRef.current.status === GameStatus.SCENARIO_GENERATION) {
                 startVotingPhase();
+            } else {
+                // Server already moved past SCENARIO_GENERATION (e.g. to PLAYER_INPUT)
+                // End the loading sequence so the game screen can render
+                setLoadingSequenceActive(false);
             }
         }, 3000);
     }, [lang, startVotingPhase]);
@@ -515,37 +525,36 @@ const App: React.FC = () => {
     useEffect(() => {
         if (gameState.status === GameStatus.SCENARIO_GENERATION) {
             setLoadingPhase('WHEEL');
-            setWheelConfig(undefined);
             setVotingConfig(undefined);
             setVotingResults(undefined);
-        } else {
+            setLoadingSequenceActive(true);
+        } else if (gameState.status !== GameStatus.PLAYER_INPUT) {
+            // Only clear if we're NOT in PLAYER_INPUT (which may arrive while wheel is still spinning)
             clearTimeout(sequenceTimeoutRef.current);
             clearInterval(votingTimerRef.current);
+            setLoadingSequenceActive(false);
         }
     }, [gameState.status, gameState.roundNumber]);
 
-    // Loading Screen Orchestration initiation
-    useEffect(() => {
-        if (gameState.status !== GameStatus.SCENARIO_GENERATION) {
-            return;
+    const renderGenerationView = () => {
+        // If we are in SCENARIO_GENERATION or early PLAYER_INPUT (loading sequence), show InteractiveLoadingScreen
+        // Always use authoritative wheelConfig from the server.
+        if (gameState.status === GameStatus.SCENARIO_GENERATION || (loadingSequenceActive && gameState.status === GameStatus.PLAYER_INPUT)) {
+            return (
+                <InteractiveLoadingScreen
+                    phase={loadingPhase}
+                    wheelConfig={gameState.wheelConfig}
+                    votingConfig={votingConfig}
+                    votingResults={votingResults}
+                    loadingText={loadingText}
+                    lang={lang}
+                    onVote={handleInteractiveLoadingScreenVote}
+                    onWheelSpinComplete={handleWheelSpinComplete}
+                />
+            );
         }
-
-        // Only logic to start WHEEL if it's new
-        if (loadingPhase === 'WHEEL' && !wheelConfig) {
-            setLoadingText(lang === 'ru' ? 'Выбор сценария...' : 'Selecting scenario...');
-            // TODO: Fetch real wheel config from server
-            const seed = getSeedFromCode(gameState.lobbyCode) + gameState.roundNumber;
-            setWheelConfig({
-                segments: [
-                    { type: 'NORMAL', label: lang === 'ru' ? 'Обычный' : 'Normal', color: '#2EA05E', probability: 0.7 },
-                    { type: 'SPECIAL', label: lang === 'ru' ? 'Специальный' : 'Special', color: '#A02E8A', probability: 0.2 },
-                    { type: 'BOSS_FIGHT', label: lang === 'ru' ? 'БОСС' : 'BOSS', color: '#A02E2E', probability: 0.1 }
-                ],
-                targetIndex: seed % 3 // pseudo deterministic until server is attached
-            });
-            // The wheel component will take care of the animation duration, then call handleWheelSpinComplete locally inside App.tsx render via prop
-        }
-    }, [gameState.status, loadingPhase, wheelConfig, lang, gameState.lobbyCode, gameState.roundNumber]);
+        return null;
+    };
 
     // Fast-forward effect if everyone has voted
     useEffect(() => {
@@ -936,20 +945,8 @@ const App: React.FC = () => {
         );
     }
 
-    if (gameState.status === GameStatus.SCENARIO_GENERATION) {
-        return (
-            <InteractiveLoadingScreen
-                phase={loadingPhase}
-                wheelConfig={wheelConfig}
-                votingConfig={votingConfig}
-                votingResults={votingResults}
-                loadingText={loadingText}
-                lang={lang}
-                onVote={handleInteractiveLoadingScreenVote}
-                onWheelSpinComplete={handleWheelSpinComplete}
-            />
-        );
-    }
+    const generationView = renderGenerationView();
+    if (generationView) return generationView;
 
     if (gameState.status === GameStatus.PLAYER_INPUT) {
         const totalTime = gameState.settings.timeLimitSeconds;
@@ -970,17 +967,17 @@ const App: React.FC = () => {
                 )}
 
                 {/* Timer - Only show when revealed */}
-                <div className={`flex justify-between items-center mb-4 bg-tg-secondaryBg p-3 rounded-lg sticky top-0 z-10 shadow-lg transition-all duration-300 ${scenarioRevealed ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'} ${isLowTime ? 'animate-shake' : ''}`}>
+                <div className={`flex justify-between items-center mb-4 bg-game-panel p-3 rounded-sm border border-game-accent/30 sticky top-0 z-10 shadow-lg transition-all duration-300 ${scenarioRevealed ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'} ${isLowTime ? 'animate-shake' : ''}`}>
                     <span className={`text-sm font-bold ${isCriticalTime ? 'text-red-500 animate-pulse' : 'text-tg-hint'}`}>{t('timeLeft', lang)}</span>
                     <span className={`text-2xl font-mono font-bold ${isCriticalTime ? 'text-red-600 animate-pulse' : 'text-tg-text'}`}>{timeLeftDisplay}s</span>
                 </div>
 
                 <div
-                    className="bg-gradient-to-b from-gray-900 to-gray-800 p-5 rounded-2xl border border-gray-700 shadow-xl mb-6 transition-all active:scale-[0.98]"
+                    className="bg-game-panel border border-game-accent/30 p-5 rounded-sm shadow-lg relative overflow-hidden mb-6 transition-all active:scale-[0.98]"
                     onClick={handleScenarioTap}
                 >
                     {gameState.scenarioImage && (
-                        <div className="mb-4 rounded-xl overflow-hidden shadow-lg border border-gray-600">
+                        <div className="mb-4 rounded-sm overflow-hidden shadow-lg border border-game-accent/20">
                             <img src={gameState.scenarioImage} alt="Scenario" className="w-full h-auto object-cover" />
                         </div>
                     )}
@@ -1005,9 +1002,12 @@ const App: React.FC = () => {
                         <div className="text-red-500 font-mono font-bold text-lg tracking-widest text-center animate-bounce">
                             {lang === 'ru' ? 'ВХОДЯЩЕЕ СООБЩЕНИЕ' : 'INCOMING TRANSMISSION'}
                         </div>
-                        <Button onClick={() => setIsSecretModalOpen(true)} className="bg-red-900/50 border-red-500 text-red-100 hover:bg-red-900">
-                            <ShieldAlert className="mr-2" size={18} />
-                            {lang === 'ru' ? 'ОТКРЫТЬ СЕКРЕТНЫЙ КАНАЛ' : 'OPEN SECURE CHANNEL'}
+                        <Button 
+                            onClick={() => setIsSecretModalOpen(true)} 
+                            className="bg-red-900/50 border-red-500 text-red-100 hover:bg-red-900 flex items-center justify-center gap-2"
+                        >
+                            <ShieldAlert size={18} className="shrink-0" />
+                            <span>{lang === 'ru' ? 'ОТКРЫТЬ СЕКРЕТНЫЙ КАНАЛ' : 'OPEN SECURE CHANNEL'}</span>
                         </Button>
                         <p className="text-xs text-tg-hint text-center max-w-xs">
                             {lang === 'ru' ? 'Вы должны прочитать личное сообщение перед тем, как действовать.' : 'You must acknowledge your private directive before acting.'}
@@ -1017,7 +1017,7 @@ const App: React.FC = () => {
                     <div className={`flex-grow flex flex-col space-y-2 transition-opacity duration-500 ${scenarioRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                         <label className="text-sm text-tg-hint">{t('submitAction', lang)}</label>
                         <textarea
-                            className="w-full flex-grow bg-tg-secondaryBg p-4 rounded-xl border border-tg-hint/20 focus:border-tg-button focus:outline-none resize-none transition-colors focus:ring-1 focus:ring-tg-button"
+                            className="w-full flex-grow bg-black/40 p-4 rounded-sm border border-game-accent/30 focus:border-game-accent focus:outline-none resize-none transition-colors focus:ring-1 focus:ring-game-accent/50 text-white font-mono text-sm"
                             placeholder={t('placeholderAction', lang)}
                             value={actionInput}
                             onChange={(e) => handleActionInputChange(e.target.value)}
@@ -1054,25 +1054,52 @@ const App: React.FC = () => {
 
     if (gameState.status === GameStatus.JUDGING) {
         return (
-            <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center space-y-6">
-                <div className="flex space-x-2">
-                    <div className="w-4 h-4 bg-tg-button rounded-full animate-bounce"></div>
-                    <div className="w-4 h-4 bg-tg-button rounded-full animate-bounce delay-100"></div>
-                    <div className="w-4 h-4 bg-tg-button rounded-full animate-bounce delay-200"></div>
+            <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center space-y-8 bg-black/20 animate-pulse-slow">
+                <div className="relative">
+                    <Cpu size={48} className="text-game-accent animate-pulse" />
+                    <div className="absolute inset-0 bg-game-accent/20 blur-xl rounded-full" />
                 </div>
-                <h2 className="text-2xl font-bold">{t('judging', lang)}</h2>
-                <p className="text-tg-hint">{t('analyzing', lang)}</p>
+                
+                <div className="space-y-3">
+                    <h2 className="text-xl font-mono font-bold tracking-widest text-white uppercase italic">
+                        SYS.JUDGING
+                    </h2>
+                    <div className="flex items-center justify-center gap-2">
+                        <div className="w-1.5 h-1.5 bg-game-accent rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                        <div className="w-1.5 h-1.5 bg-game-accent rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                        <div className="w-1.5 h-1.5 bg-game-accent rounded-full animate-bounce"></div>
+                    </div>
+                </div>
+                
+                <p className="text-xs font-mono text-tg-hint uppercase tracking-widest max-w-xs px-4">
+                    {t('analyzing', lang) || "Awaiting GM Consensus..."}
+                </p>
+                
+                <div className="w-48 h-1 bg-game-accent/10 rounded-full overflow-hidden relative border border-game-accent/20">
+                    <div className="absolute inset-0 bg-game-accent animate-loading-bar" />
+                </div>
             </div>
         );
     }
 
     if ((gameState.status === GameStatus.RESULTS || gameState.status === GameStatus.EPILOGUE) && gameState.roundResult) {
         return (
-            <div className="min-h-screen flex flex-col p-4">
-                <h2 className="text-3xl font-black mb-6 text-center">{t('results', lang)}</h2>
+            <div className="min-h-screen flex flex-col p-4 animate-fade-in pb-20">
+                {/* Tactical Header */}
+                <header className="flex items-center justify-between mb-8 border-b border-game-accent/30 pb-4">
+                    <div className="flex items-center gap-3">
+                        <Terminal size={20} className="text-game-accent" />
+                        <h1 className="text-base font-mono font-bold tracking-widest text-white uppercase italic">
+                            SYS.RESULTS
+                        </h1>
+                    </div>
+                    <div className="text-xs font-mono text-tg-hint uppercase">
+                        {lang === 'ru' ? 'РАУНД' : 'ROUND'} {gameState.roundNumber}
+                    </div>
+                </header>
 
                 {gameState.roundResult?.image && (
-                    <div className="mb-6 rounded-2xl overflow-hidden shadow-2xl border border-tg-hint/20">
+                    <div className="mb-6 rounded-sm overflow-hidden shadow-lg border border-game-accent/20">
                         <img src={gameState.roundResult.image} alt="Result" className="w-full h-auto object-cover" />
                     </div>
                 )}
@@ -1083,7 +1110,7 @@ const App: React.FC = () => {
                     </div>
                 )}
                 <div
-                    className="bg-tg-secondaryBg p-5 rounded-2xl mb-6 shadow-lg border border-tg-hint/10 min-h-[200px]"
+                    className="bg-game-panel border border-game-accent/30 p-5 rounded-sm shadow-lg overflow-hidden mb-6 min-h-[200px]"
                     onClick={handleResultsTap}
                 >
                     <h3 className="text-tg-hint text-xs uppercase tracking-widest mb-2">{lang === 'ru' ? 'РЕЗУЛЬТАТ' : 'RESULT'}</h3>
@@ -1112,11 +1139,11 @@ const App: React.FC = () => {
                             return (
                                 <div
                                     key={p.id}
-                                    className={`flex items-center justify-between p-3 rounded-lg border animate-slide-up ${deathInfo ? 'border-red-900 bg-red-900/10' : 'border-green-900 bg-green-900/10'}`}
+                                    className={`flex items-center justify-between p-3 rounded-sm border animate-slide-up ${deathInfo ? 'border-red-900 bg-red-900/10' : 'border-green-900 bg-green-900/10'}`}
                                     style={{ animationDelay: `${index * 100}ms` }}
                                 >
                                     <span className="font-bold">{p.name}</span>
-                                    <span className={`text-xs font-bold px-2 py-1 rounded ${deathInfo ? 'bg-red-600 text-white' : 'bg-green-600 text-white'}`}>
+                                    <span className={`text-xs font-bold px-2 py-1 rounded-sm ${deathInfo ? 'bg-red-600 text-white' : 'bg-green-600 text-white'}`}>
                                         {deathInfo ? (deathInfo.reason || t('died', lang)) : t('survived', lang)}
                                     </span>
                                 </div>
@@ -1141,13 +1168,13 @@ const App: React.FC = () => {
                                         >
                                             {lang === 'ru' ? 'Продолжить историю' : 'Continue Story'}
                                         </Button>
-                                        {/* Avatars of players who voted 'continue' */}
-                                        <div className="absolute right-2 -top-3 flex -space-x-2">
+                                        {/* Avatars of players who voted 'continue' - Stacked 50% right-to-left */}
+                                        <div className="absolute top-0 right-1 -translate-y-1/2 flex flex-row-reverse -space-x-4 pointer-events-none">
                                             {gameState.players.filter(p => p.nextRoundVote === 'continue').map(p => (
                                                 p.avatarUrl ? (
-                                                    <img key={p.id} src={p.avatarUrl} alt={p.name} className="w-8 h-8 rounded-full border-2 border-tg-bg bg-tg-secondaryBg object-cover" />
+                                                    <img key={p.id} src={p.avatarUrl} alt={p.name} className="w-8 h-8 rounded-full border-2 border-game-panel bg-tg-secondaryBg object-cover shadow-lg" />
                                                 ) : (
-                                                    <div key={p.id} className="w-8 h-8 rounded-full border-2 border-tg-bg bg-tg-button flex items-center justify-center text-[10px] font-bold text-white uppercase">
+                                                    <div key={p.id} className="w-8 h-8 rounded-full border-2 border-game-panel bg-tg-button flex items-center justify-center text-[10px] font-bold text-white uppercase shadow-lg">
                                                         {p.name.charAt(0)}
                                                     </div>
                                                 )
@@ -1166,13 +1193,13 @@ const App: React.FC = () => {
                                     >
                                         {lang === 'ru' ? 'Вернуться в лобби' : 'Return to Lobby'}
                                     </Button>
-                                    {/* Avatars of players who voted 'lobby' */}
-                                    <div className="absolute right-2 -top-3 flex -space-x-2">
+                                    {/* Avatars of players who voted 'lobby' - Stacked 50% right-to-left */}
+                                    <div className="absolute top-0 right-1 -translate-y-1/2 flex flex-row-reverse -space-x-4 pointer-events-none">
                                         {gameState.players.filter(p => p.nextRoundVote === 'lobby').map(p => (
                                             p.avatarUrl ? (
-                                                <img key={p.id} src={p.avatarUrl} alt={p.name} className="w-8 h-8 rounded-full border-2 border-tg-bg bg-tg-secondaryBg object-cover" />
+                                                <img key={p.id} src={p.avatarUrl} alt={p.name} className="w-8 h-8 rounded-full border-2 border-game-panel bg-tg-secondaryBg object-cover shadow-lg" />
                                             ) : (
-                                                <div key={p.id} className="w-8 h-8 rounded-full border-2 border-tg-bg bg-tg-button flex items-center justify-center text-[10px] font-bold text-white uppercase">
+                                                <div key={p.id} className="w-8 h-8 rounded-full border-2 border-game-panel bg-tg-button flex items-center justify-center text-[10px] font-bold text-white uppercase shadow-lg">
                                                     {p.name.charAt(0)}
                                                 </div>
                                             )

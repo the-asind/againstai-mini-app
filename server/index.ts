@@ -11,6 +11,12 @@ import { validateTelegramData, TelegramUser } from './utils/telegramAuth';
 import { LobbySettings, Player } from '../types';
 import { setupProxy } from './utils/proxy';
 import { cleanupOldFiles } from './utils/fileStorage';
+import logger from './utils/logger';
+
+if (process.argv.includes('--mock-ai')) {
+    process.env.MOCK_AI = 'true';
+    logger.warn("MOCK_AI FLAG DETECTED! ALL AI RESPONSES WILL BE MOCKED.");
+}
 
 // Initialize proxy for global fetch (required for Gemini SDK behind some proxies)
 setupProxy();
@@ -54,7 +60,7 @@ io.use((socket, next) => {
 
     // Development Bypass (Optional, remove for prod, but useful here if CONFIG.BOT_TOKEN is missing)
     if (!CONFIG.BOT_TOKEN && process.env.NODE_ENV !== 'production') {
-        console.warn("DEV MODE: Skipping Auth Check due to missing token.");
+        logger.warn("DEV MODE: Skipping Auth Check due to missing token.");
 
         // Use a special DEV flag indicating this socket is fully trusted because we're in dev mode
         socket.telegramUser = { id: 0, first_name: "Dev", username: "dev", isDevBypass: true } as any;
@@ -68,7 +74,7 @@ io.use((socket, next) => {
     const { isValid, user, error } = validateTelegramData(initData);
 
     if (!isValid || !user) {
-        console.error(`Auth Failed: ${error}`);
+        logger.error(`Auth Failed: ${error}`);
         return next(new Error("Authentication failed: Invalid Telegram Data"));
     }
 
@@ -168,12 +174,12 @@ io.on('connection', (socket) => {
         // Security Check: Ensure user is actually in the lobby
         const pid = ((user as any).isDevBypass && playerId) ? playerId : user.id.toString();
         // DEBUG LOG
-        console.log(`[DEV DEBUG] provide_keys from pid: ${pid}, lobby: ${code}. Has Gemini: ${!!keys.gemini}, Has Navy: ${!!keys.navy}`);
+        logger.debug(`[DEV DEBUG] provide_keys from pid: ${pid}, lobby: ${code}. Has Gemini: ${!!keys.gemini}, Has Navy: ${!!keys.navy}`);
 
         if (lobbyService.isPlayerInLobby(code, pid)) {
             lobbyService.receiveKeys(code, pid, keys);
         } else {
-            console.log(`[DEV DEBUG] provide_keys REJECTED - Player ${pid} is not in lobby ${code}.`);
+            logger.debug(`[DEV DEBUG] provide_keys REJECTED - Player ${pid} is not in lobby ${code}.`);
         }
     });
 
@@ -223,5 +229,5 @@ io.on('connection', (socket) => {
 });
 
 httpServer.listen(CONFIG.PORT, () => {
-    console.log(`Server running on port ${CONFIG.PORT}`);
+    logger.info(`Server running on port ${CONFIG.PORT}`);
 });
